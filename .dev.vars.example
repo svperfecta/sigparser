@@ -1,0 +1,11 @@
+# Copy this file to .dev.vars and fill in your values
+# .dev.vars is gitignored and loaded automatically by wrangler dev
+
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GMAIL_REFRESH_TOKEN_WORK=your-refresh-token
+MY_EMAIL_WORK=you@company.com
+
+# Optional: Personal account
+# GMAIL_REFRESH_TOKEN_PERSONAL=your-personal-refresh-token
+# MY_EMAIL_PERSONAL=you@gmail.com

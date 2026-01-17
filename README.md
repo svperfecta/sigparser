@@ -25,6 +25,10 @@ A self-hosted contact intelligence system that mines your email history to build
 # Install dependencies
 npm install
 
+# Copy and fill in your secrets
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars with your actual values
+
 # Run database migrations (local)
 npx wrangler d1 execute sigparser-db --local --file=src/db/migrations/0001_initial.sql
 
@@ -33,6 +37,8 @@ npm run dev
 
 # Open http://localhost:8787
 ```
+
+> **Note**: `.dev.vars` is automatically loaded by wrangler and gitignored.
 
 ### Deploy to Production
 
