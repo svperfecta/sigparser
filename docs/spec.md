@@ -1180,7 +1180,7 @@ export function createLogger(requestId?: string) {
 ```bash
 # Initial setup
 npm install
-cp .env.example .env  # Edit with your values
+cp .dev.vars.example .dev.vars  # Edit with your values
 
 # Development
 npm run dev           # Start Worker dev server (port 8787)
