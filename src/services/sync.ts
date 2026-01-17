@@ -103,15 +103,25 @@ export class SyncService {
 
     result.currentDate = currentDate;
 
-    // Get message IDs for this day (limited to maxMessages to stay under subrequest limits)
-    const listResponse = await this.config.gmail.listMessages({
-      maxResults: maxMessages,
-      q: query,
-    });
+    // Get ALL message IDs for this day (just IDs - lightweight)
+    let pageToken: string | undefined;
+    let allMessageIds: string[] = [];
 
-    const messageIds = listResponse.messages?.map((m) => m.id) ?? [];
+    do {
+      const listResponse = await this.config.gmail.listMessages({
+        pageToken,
+        maxResults: 100,
+        q: query,
+      });
 
-    if (messageIds.length === 0) {
+      if (listResponse.messages !== undefined && listResponse.messages.length > 0) {
+        allMessageIds = allMessageIds.concat(listResponse.messages.map((m) => m.id));
+      }
+
+      pageToken = listResponse.nextPageToken;
+    } while (pageToken !== undefined);
+
+    if (allMessageIds.length === 0) {
       // No messages on this date, advance to next day
       this.logger.info('No messages on date, advancing', {
         account: this.config.account,
@@ -123,18 +133,43 @@ export class SyncService {
       return result;
     }
 
-    // Check if there are more messages for this day
-    const hasMoreMessagesToday = listResponse.nextPageToken !== undefined;
+    // Filter out already-processed messages
+    const unprocessedIds: string[] = [];
+    for (const id of allMessageIds) {
+      const isProcessed = await this.isMessageProcessed(id);
+      if (!isProcessed) {
+        unprocessedIds.push(id);
+      }
+    }
+
+    if (unprocessedIds.length === 0) {
+      // All messages for this day already processed, advance to next day
+      this.logger.info('All messages processed for date, advancing', {
+        account: this.config.account,
+        fromDate: currentDate,
+        toDate: nextDate,
+        totalMessages: allMessageIds.length,
+      });
+      await this.updateSyncState(profile.historyId, nextDate);
+      result.hasMore = nextDate <= today;
+      return result;
+    }
+
+    // Take only up to maxMessages unprocessed IDs for this batch
+    const batchIds = unprocessedIds.slice(0, maxMessages);
+    const hasMoreMessagesToday = unprocessedIds.length > maxMessages;
 
     this.logger.info('Fetching messages for date', {
-      count: messageIds.length,
+      totalForDay: allMessageIds.length,
+      unprocessed: unprocessedIds.length,
+      batchSize: batchIds.length,
       date: currentDate,
       hasMoreToday: hasMoreMessagesToday,
       account: this.config.account,
     });
 
-    // Fetch message metadata (limited batch to stay under subrequest limits)
-    const messages = await this.config.gmail.batchGetMessages(messageIds);
+    // Fetch message metadata for this batch
+    const messages = await this.config.gmail.batchGetMessages(batchIds);
 
     // Sort by internal date (oldest first within the day)
     messages.sort((a, b) => {
