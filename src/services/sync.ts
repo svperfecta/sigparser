@@ -52,9 +52,9 @@ export class SyncService {
    * Run a batch sync - process messages one day at a time, oldest first
    * This is designed to be called repeatedly by cron until all messages are synced
    *
-   * @param _maxMessages Ignored - we process entire days to maintain chronological order
+   * @param maxMessages Maximum messages to process per batch (default 25 to stay under subrequest limits)
    */
-  async batchSync(_maxMessages = 500): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
+  async batchSync(maxMessages = 25): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
     this.logger.info('Starting batch sync', {
       account: this.config.account,
     });
@@ -79,8 +79,8 @@ export class SyncService {
     const syncState = await this.getSyncState();
 
     // Determine the current date to process (YYYY-MM-DD format)
-    // Default start is 2010-01-01
-    const currentDate = syncState?.batch_current_date ?? '2010-01-01';
+    // Default start is 2000-01-01 (earlier than Gmail's 2004 launch to catch imported emails)
+    const currentDate = syncState?.batch_current_date ?? '2000-01-01';
     const today = new Date().toISOString().slice(0, 10);
 
     // If we've caught up to today, we're done with batch sync
@@ -103,25 +103,15 @@ export class SyncService {
 
     result.currentDate = currentDate;
 
-    // Collect ALL message IDs for this day
-    let pageToken: string | undefined;
-    let allMessageIds: string[] = [];
+    // Get message IDs for this day (limited to maxMessages to stay under subrequest limits)
+    const listResponse = await this.config.gmail.listMessages({
+      maxResults: maxMessages,
+      q: query,
+    });
 
-    do {
-      const listResponse = await this.config.gmail.listMessages({
-        pageToken,
-        maxResults: 100,
-        q: query,
-      });
+    const messageIds = listResponse.messages?.map((m) => m.id) ?? [];
 
-      if (listResponse.messages !== undefined && listResponse.messages.length > 0) {
-        allMessageIds = allMessageIds.concat(listResponse.messages.map((m) => m.id));
-      }
-
-      pageToken = listResponse.nextPageToken;
-    } while (pageToken !== undefined);
-
-    if (allMessageIds.length === 0) {
+    if (messageIds.length === 0) {
       // No messages on this date, advance to next day
       this.logger.info('No messages on date, advancing', {
         account: this.config.account,
@@ -133,19 +123,18 @@ export class SyncService {
       return result;
     }
 
+    // Check if there are more messages for this day
+    const hasMoreMessagesToday = listResponse.nextPageToken !== undefined;
+
     this.logger.info('Fetching messages for date', {
-      count: allMessageIds.length,
+      count: messageIds.length,
       date: currentDate,
+      hasMoreToday: hasMoreMessagesToday,
       account: this.config.account,
     });
 
-    // Batch fetch message metadata (process in chunks of 100 for API limits)
-    const messages: import('./gmail.js').GmailMessage[] = [];
-    for (let i = 0; i < allMessageIds.length; i += 100) {
-      const chunk = allMessageIds.slice(i, i + 100);
-      const chunkMessages = await this.config.gmail.batchGetMessages(chunk);
-      messages.push(...chunkMessages);
-    }
+    // Fetch message metadata (limited batch to stay under subrequest limits)
+    const messages = await this.config.gmail.batchGetMessages(messageIds);
 
     // Sort by internal date (oldest first within the day)
     messages.sort((a, b) => {
@@ -190,18 +179,28 @@ export class SyncService {
       }
     }
 
-    // Update sync state - advance to next day
-    await this.updateSyncState(profile.historyId, nextDate);
+    // Only advance to next day if we've processed all messages for today
+    if (!hasMoreMessagesToday) {
+      await this.updateSyncState(profile.historyId, nextDate);
+      this.logger.info('Batch sync complete for date', {
+        account: this.config.account,
+        date: currentDate,
+        nextDate,
+        ...result,
+      });
+    } else {
+      // More messages today, don't advance
+      await this.updateSyncState(profile.historyId, currentDate);
+      this.logger.info('Batch sync progress for date', {
+        account: this.config.account,
+        date: currentDate,
+        hasMoreToday: true,
+        ...result,
+      });
+    }
 
-    this.logger.info('Batch sync complete for date', {
-      account: this.config.account,
-      date: currentDate,
-      nextDate,
-      ...result,
-    });
-
-    // There's more to process if we haven't reached today
-    result.hasMore = nextDate <= today;
+    // There's more to process
+    result.hasMore = hasMoreMessagesToday || nextDate <= today;
 
     return result;
   }
