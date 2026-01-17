@@ -100,7 +100,9 @@ npm run deploy
 6. Click **Create**
 7. Copy the **Client ID** and **Client Secret**
 
-### 4. Get Gmail Refresh Token
+### 4. Get Gmail Refresh Tokens
+
+> **Repeat this process for each Gmail account** you want to sync (work and personal).
 
 1. Go to [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/)
 2. Click the **gear icon** (top right) → Check "Use your own OAuth credentials"
@@ -110,7 +112,9 @@ npm run deploy
 5. Click **Authorize APIs**
 6. Sign in with the Gmail account you want to sync
 7. Click **Exchange authorization code for tokens**
-8. Copy the **Refresh token**
+8. Copy the **Refresh token** → save as `GMAIL_REFRESH_TOKEN_WORK` or `GMAIL_REFRESH_TOKEN_PERSONAL`
+
+**For your second account**: Sign out of Google, return to step 1, and sign in with your other account.
 
 ### 5. Set Cloudflare Secrets
 
