@@ -64,9 +64,11 @@ export interface Email extends Stats, Timestamps {
   recentThreads: ThreadReference[];
 }
 
+export type BlacklistCategory = 'spam' | 'personal' | 'transactional' | 'manual';
+
 export interface BlacklistEntry {
   domain: string;
-  category: 'spam' | 'personal' | 'transactional' | 'manual';
+  category: BlacklistCategory;
   source: string | null;
   createdAt: string;
   updatedAt: string;

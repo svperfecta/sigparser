@@ -5,6 +5,12 @@ import { securityHeaders } from './middleware/security.js';
 import { verifyCloudflareAccess } from './middleware/auth.js';
 import { createLogger } from './utils/logger.js';
 
+// Import API routes
+import companiesRoutes from './routes/api/companies.js';
+import contactsRoutes from './routes/api/contacts.js';
+import blacklistRoutes from './routes/api/blacklist.js';
+import syncRoutes from './routes/api/sync.js';
+
 // Create app with typed environment
 const app = new Hono<{ Bindings: Env }>();
 
@@ -45,58 +51,10 @@ app.use('/api/*', verifyCloudflareAccess);
 app.use('/*', verifyCloudflareAccess);
 
 // API Routes
-app.get('/api/companies', (c) => {
-  // TODO: Implement companies list
-  return c.json({ data: [], pagination: { page: 1, limit: 25, total: 0, totalPages: 0 } });
-});
-
-app.get('/api/companies/:id', (c) => {
-  const id = c.req.param('id');
-  // TODO: Implement company detail
-  return c.json({ data: { id } });
-});
-
-app.get('/api/contacts', (c) => {
-  // TODO: Implement contacts list
-  return c.json({ data: [], pagination: { page: 1, limit: 25, total: 0, totalPages: 0 } });
-});
-
-app.get('/api/contacts/:id', (c) => {
-  const id = c.req.param('id');
-  // TODO: Implement contact detail
-  return c.json({ data: { id } });
-});
-
-app.get('/api/blacklist', (c) => {
-  // TODO: Implement blacklist list
-  return c.json({ data: [] });
-});
-
-app.post('/api/blacklist', (c) => {
-  // TODO: Implement blacklist add
-  return c.json({ success: true });
-});
-
-app.delete('/api/blacklist/:domain', (c) => {
-  const domain = c.req.param('domain');
-  // TODO: Implement blacklist remove
-  return c.json({ success: true, domain });
-});
-
-app.get('/api/sync/status', (c) => {
-  // TODO: Implement sync status
-  return c.json({
-    data: [
-      { account: 'work', lastSync: null, lastHistoryId: null },
-      { account: 'personal', lastSync: null, lastHistoryId: null },
-    ],
-  });
-});
-
-app.post('/api/sync/trigger', (c) => {
-  // TODO: Implement sync trigger
-  return c.json({ success: true, message: 'Sync triggered' });
-});
+app.route('/api/companies', companiesRoutes);
+app.route('/api/contacts', contactsRoutes);
+app.route('/api/blacklist', blacklistRoutes);
+app.route('/api/sync', syncRoutes);
 
 // Page Routes (HTMX)
 app.get('/', (c) => {

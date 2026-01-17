@@ -1,11 +1,10 @@
-import type { BlacklistEntry, BlacklistRow } from '../types/index.js';
+import type { BlacklistEntry, BlacklistRow, BlacklistCategory } from '../types/index.js';
 import { PERSONAL_EMAIL_DOMAINS, TRANSACTIONAL_EMAIL_PATTERNS } from '../types/constants.js';
 import { extractDomain } from '../utils/email.js';
 import { now } from '../utils/date.js';
 
-// === Types ===
-
-export type BlacklistCategory = 'spam' | 'personal' | 'transactional' | 'manual';
+// Re-export for convenience
+export type { BlacklistCategory } from '../types/index.js';
 
 // === Blacklist Service ===
 
