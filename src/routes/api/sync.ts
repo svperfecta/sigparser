@@ -62,13 +62,33 @@ sync.post('/trigger', async (c) => {
 
   logger.info('Manual sync triggered', { account, full });
 
-  // Run sync (this could take a while, but Cloudflare Workers allow up to 30s for HTTP requests)
-  const result = full ? await syncService.fullSync() : await syncService.incrementalSync();
+  // Check if account has been synced before
+  const status = await getSyncStatus(c.env.DB);
+  const accountStatus = status.find((s) => s.account === account);
+  const hasHistory = accountStatus?.lastHistoryId !== null;
+
+  // Run appropriate sync type:
+  // - full: process all messages (slow, use sparingly)
+  // - incremental: use Gmail history API (fast, for already-synced accounts)
+  // - batch: process N messages (for initial catch-up)
+  let result;
+  let syncType: string;
+
+  if (full) {
+    result = await syncService.fullSync();
+    syncType = 'full';
+  } else if (hasHistory) {
+    result = await syncService.incrementalSync();
+    syncType = 'incremental';
+  } else {
+    result = await syncService.batchSync(500);
+    syncType = 'batch';
+  }
 
   return c.json({
     success: true,
     account,
-    type: full ? 'full' : 'incremental',
+    type: syncType,
     result,
   });
 });
