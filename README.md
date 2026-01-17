@@ -137,24 +137,19 @@ npx wrangler secret put GMAIL_REFRESH_TOKEN_PERSONAL
 npx wrangler secret put MY_EMAIL_PERSONAL
 ```
 
-### 6. Set Up Cloudflare Access (Authentication)
+### 6. Set Up Authentication
 
-sigparser uses Cloudflare Access for authentication - no passwords to manage.
+sigparser uses basic authentication. Set your credentials:
 
-1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
-2. Navigate to **Access → Applications**
-3. Click **Add an application → Self-hosted**
-4. Configure:
-   - Application name: `sigparser`
-   - Session duration: 24 hours (or your preference)
-   - Application domain: your worker URL (e.g., `sigparser.your-subdomain.workers.dev`)
-5. Add a policy:
-   - Policy name: `Allow me`
-   - Action: Allow
-   - Include: Emails - your email address(es)
-6. Save
+```bash
+npx wrangler secret put AUTH_USERNAME
+# Enter your desired username
 
-Now only you can access the application!
+npx wrangler secret put AUTH_PASSWORD
+# Enter a strong password
+```
+
+Your browser will prompt for credentials when accessing the app.
 
 ---
 
@@ -168,6 +163,8 @@ Now only you can access the application!
 | `MY_EMAIL_WORK` | Yes | Your work email address |
 | `GMAIL_REFRESH_TOKEN_PERSONAL` | No | Refresh token for personal Gmail |
 | `MY_EMAIL_PERSONAL` | No | Your personal email address |
+| `AUTH_USERNAME` | Yes | Basic auth username |
+| `AUTH_PASSWORD` | Yes | Basic auth password |
 
 ---
 

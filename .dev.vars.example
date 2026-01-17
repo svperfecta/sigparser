@@ -9,3 +9,7 @@ MY_EMAIL_WORK=you@company.com
 # Optional: Personal account
 # GMAIL_REFRESH_TOKEN_PERSONAL=your-personal-refresh-token
 # MY_EMAIL_PERSONAL=you@gmail.com
+
+# Authentication (skipped on localhost)
+AUTH_USERNAME=your-username
+AUTH_PASSWORD=your-strong-password
