@@ -17,6 +17,13 @@ declare module 'hono' {
 export async function verifyCloudflareAccess(c: Context, next: Next): Promise<Response | undefined> {
   const jwt = c.req.header('Cf-Access-Jwt-Assertion');
 
+  // Development bypass - skip auth when no JWT and running locally
+  if ((jwt === undefined || jwt === '') && c.req.header('Host')?.includes('localhost')) {
+    c.set('userEmail', 'dev@localhost');
+    await next();
+    return undefined;
+  }
+
   if (jwt === undefined || jwt === '') {
     throw new UnauthorizedError('Missing Cloudflare Access JWT');
   }
