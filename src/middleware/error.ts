@@ -41,7 +41,21 @@ export async function errorHandler(c: Context, next: Next): Promise<Response> {
   try {
     await next();
   } catch (error) {
-    console.error('Unhandled error:', error);
+    const requestId = c.get('requestId') as string | undefined;
+
+    // Structured error logging for Cloudflare
+    const errorLog = {
+      level: 'error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      requestId,
+      errorCode: error instanceof AppError ? error.code : 'INTERNAL_ERROR',
+      errorName: error instanceof Error ? error.name : 'Error',
+      stack: error instanceof Error ? error.stack : undefined,
+      path: c.req.path,
+      method: c.req.method,
+    };
+    console.error(JSON.stringify(errorLog));
 
     if (error instanceof AppError) {
       const body: ApiError = {

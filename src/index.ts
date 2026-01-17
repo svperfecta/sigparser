@@ -27,6 +27,7 @@ app.use('*', securityHeaders);
 // Request logging middleware
 app.use('*', async (c, next) => {
   const requestId = crypto.randomUUID();
+  c.set('requestId', requestId);
   const logger = createLogger(requestId);
 
   logger.info('Request started', {

@@ -11,6 +11,7 @@ interface CloudflareAccessJWT {
 declare module 'hono' {
   interface ContextVariableMap {
     userEmail: string;
+    requestId: string;
   }
 }
 
