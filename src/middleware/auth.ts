@@ -1,12 +1,4 @@
 import type { Context, Next } from 'hono';
-import { UnauthorizedError } from './error.js';
-
-interface CloudflareAccessJWT {
-  email: string;
-  sub: string;
-  iat: number;
-  exp: number;
-}
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -15,46 +7,58 @@ declare module 'hono' {
   }
 }
 
-export async function verifyCloudflareAccess(c: Context, next: Next): Promise<Response | undefined> {
-  const jwt = c.req.header('Cf-Access-Jwt-Assertion');
-
-  // Development bypass - skip auth when no JWT and running locally
+/**
+ * Basic auth middleware
+ * Uses AUTH_USERNAME and AUTH_PASSWORD from environment (defaults to admin/admin for dev)
+ */
+export async function basicAuth(c: Context, next: Next): Promise<Response | void> {
+  // Development bypass - skip auth when running locally
   const host = c.req.header('Host') ?? '';
-  if ((jwt === undefined || jwt === '') && host.includes('localhost')) {
+  if (host.includes('localhost')) {
     c.set('userEmail', 'dev@localhost');
     await next();
-    return undefined;
+    return;
   }
 
-  if (jwt === undefined || jwt === '') {
-    throw new UnauthorizedError('Missing Cloudflare Access JWT');
+  const authHeader = c.req.header('Authorization');
+
+  if (authHeader === undefined || !authHeader.startsWith('Basic ')) {
+    return new Response('Unauthorized', {
+      status: 401,
+      headers: {
+        'WWW-Authenticate': 'Basic realm="sigparser"',
+      },
+    });
   }
 
   try {
-    // Cloudflare Access validates the JWT automatically at the edge
-    // We just need to extract the claims from the payload
-    const parts = jwt.split('.');
-    const payloadPart = parts[1];
-    if (payloadPart === undefined) {
-      throw new UnauthorizedError('Invalid JWT format');
+    const base64Credentials = authHeader.slice(6);
+    const credentials = atob(base64Credentials);
+    const [username, password] = credentials.split(':');
+
+    // Get credentials from environment or use defaults
+    const env = c.env as { AUTH_USERNAME?: string; AUTH_PASSWORD?: string };
+    const expectedUsername = env.AUTH_USERNAME ?? 'admin';
+    const expectedPassword = env.AUTH_PASSWORD ?? 'admin';
+
+    if (username !== expectedUsername || password !== expectedPassword) {
+      return new Response('Invalid credentials', {
+        status: 401,
+        headers: {
+          'WWW-Authenticate': 'Basic realm="sigparser"',
+        },
+      });
     }
 
-    const payload = JSON.parse(atob(payloadPart)) as CloudflareAccessJWT;
-
-    // Check expiration
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.exp < now) {
-      throw new UnauthorizedError('JWT has expired');
-    }
-
-    c.set('userEmail', payload.email);
-  } catch (error) {
-    if (error instanceof UnauthorizedError) {
-      throw error;
-    }
-    throw new UnauthorizedError('Invalid JWT');
+    c.set('userEmail', username);
+  } catch {
+    return new Response('Invalid authorization header', {
+      status: 401,
+      headers: {
+        'WWW-Authenticate': 'Basic realm="sigparser"',
+      },
+    });
   }
 
   await next();
-  return undefined;
 }

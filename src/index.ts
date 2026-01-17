@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types/index.js';
 import { errorHandler } from './middleware/error.js';
 import { securityHeaders } from './middleware/security.js';
-import { verifyCloudflareAccess } from './middleware/auth.js';
+import { basicAuth } from './middleware/auth.js';
 import { createLogger } from './utils/logger.js';
 
 // Import API routes
@@ -73,14 +73,44 @@ app.get('/static/:filename', async (c) => {
   });
 });
 
-// Health check (no auth required)
-app.get('/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check (no auth required) - includes sync status
+app.get('/health', async (c) => {
+  try {
+    // Get last sync times from sync_state table
+    const syncStates = await c.env.DB.prepare(
+      'SELECT account, last_sync_at, last_history_id FROM sync_state',
+    ).all<{ account: string; last_sync_at: string | null; last_history_id: string | null }>();
+
+    const workSync = syncStates.results?.find((s) => s.account === 'work');
+    const personalSync = syncStates.results?.find((s) => s.account === 'personal');
+
+    return c.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      sync: {
+        work: {
+          lastSync: workSync?.last_sync_at ?? null,
+          hasHistoryId: workSync?.last_history_id !== null,
+        },
+        personal: {
+          lastSync: personalSync?.last_sync_at ?? null,
+          hasHistoryId: personalSync?.last_history_id !== null,
+        },
+      },
+    });
+  } catch {
+    return c.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      sync: null,
+      note: 'Database not initialized',
+    });
+  }
 });
 
 // Auth required for all other routes
-app.use('/api/*', verifyCloudflareAccess);
-app.use('/*', verifyCloudflareAccess);
+app.use('/api/*', basicAuth);
+app.use('/*', basicAuth);
 
 // API Routes
 app.route('/api/companies', companiesRoutes);
