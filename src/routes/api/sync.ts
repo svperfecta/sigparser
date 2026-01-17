@@ -62,26 +62,32 @@ sync.post('/trigger', async (c) => {
 
   logger.info('Manual sync triggered', { account, full });
 
-  // Check if account has been synced before
+  // Check if account has caught up (batch sync complete)
   const status = await getSyncStatus(c.env.DB);
   const accountStatus = status.find((s) => s.account === account);
-  const hasHistory = accountStatus?.lastHistoryId !== null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // hasCaughtUp = true when batchCurrentDate is in the future (past today)
+  const hasCaughtUp =
+    accountStatus !== undefined &&
+    accountStatus.batchCurrentDate !== null &&
+    accountStatus.batchCurrentDate > today;
 
   // Run appropriate sync type:
   // - full: process all messages (slow, use sparingly)
   // - incremental: use Gmail history API (fast, for already-synced accounts)
-  // - batch: process N messages (for initial catch-up)
+  // - batch: process one day at a time oldest-first (for catch-up)
   let result;
   let syncType: string;
 
   if (full) {
     result = await syncService.fullSync();
     syncType = 'full';
-  } else if (hasHistory) {
+  } else if (hasCaughtUp) {
     result = await syncService.incrementalSync();
     syncType = 'incremental';
   } else {
-    result = await syncService.batchSync(500);
+    result = await syncService.batchSync();
     syncType = 'batch';
   }
 

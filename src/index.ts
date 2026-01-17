@@ -169,17 +169,24 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
           account: 'work',
         });
 
-        // Check if we have a history ID (already synced before)
+        // Check if we've caught up to today (batch sync complete)
         const status = await getSyncStatus(env.DB);
         const workStatus = status.find((s) => s.account === 'work');
+        const today = new Date().toISOString().slice(0, 10);
 
-        if (workStatus?.lastHistoryId !== null) {
-          // Incremental sync
+        // Use batch sync until we've caught up, then switch to incremental
+        const hasCaughtUp =
+          workStatus !== undefined &&
+          workStatus.batchCurrentDate !== null &&
+          workStatus.batchCurrentDate > today;
+
+        if (hasCaughtUp) {
+          // Incremental sync for new messages
           const result = await syncService.incrementalSync();
           results.push({ account: 'work', type: 'incremental', ...result });
         } else {
-          // Batch sync for initial catch-up (500 messages)
-          const result = await syncService.batchSync(500);
+          // Batch sync for catch-up (one day at a time, oldest first)
+          const result = await syncService.batchSync();
           results.push({ account: 'work', type: 'batch', ...result });
         }
       } catch (error) {
@@ -204,14 +211,20 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
           account: 'personal',
         });
 
-        const status = await getSyncStatus(env.DB);
-        const personalStatus = status.find((s) => s.account === 'personal');
+        const personalStatus = (await getSyncStatus(env.DB)).find((s) => s.account === 'personal');
+        const todayPersonal = new Date().toISOString().slice(0, 10);
 
-        if (personalStatus?.lastHistoryId !== null) {
+        // Use batch sync until we've caught up, then switch to incremental
+        const personalCaughtUp =
+          personalStatus !== undefined &&
+          personalStatus.batchCurrentDate !== null &&
+          personalStatus.batchCurrentDate > todayPersonal;
+
+        if (personalCaughtUp) {
           const result = await syncService.incrementalSync();
           results.push({ account: 'personal', type: 'incremental', ...result });
         } else {
-          const result = await syncService.batchSync(500);
+          const result = await syncService.batchSync();
           results.push({ account: 'personal', type: 'batch', ...result });
         }
       } catch (error) {

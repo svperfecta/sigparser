@@ -198,6 +198,7 @@ export interface SyncStateRow {
   account: string;
   last_history_id: string | null;
   last_sync: string | null;
+  batch_current_date: string | null;
   created_at: string;
   updated_at: string;
 }

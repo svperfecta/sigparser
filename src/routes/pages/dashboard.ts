@@ -30,12 +30,30 @@ dashboard.get('/', async (c) => {
   const workSync = syncStatus.find((s) => s.account === 'work');
   const personalSync = syncStatus.find((s) => s.account === 'personal');
 
-  const formatSyncStatus = (lastSync: string | null): string => {
+  const formatLastRun = (lastSync: string | null): string => {
     if (lastSync === null) {
-      return 'Never synced';
+      return 'Never';
     }
     const date = new Date(lastSync);
-    return date.toLocaleString();
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
+
+  const formatBatchProgress = (batchDate: string | null): string => {
+    if (batchDate === null) {
+      return 'Not started';
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (batchDate > today) {
+      return '✓ Caught up!';
+    }
+    return batchDate;
   };
 
   // Find most recent sync time
@@ -77,36 +95,50 @@ dashboard.get('/', async (c) => {
     <div class="grid grid-2">
       ${card(
         `
-        <div class="sync-status">
-          <div class="sync-account">
-            <span class="sync-label">Work Account</span>
-            <span class="sync-time">${formatSyncStatus(workSync?.lastSync ?? null)}</span>
-          </div>
-          <button
-            class="btn btn-sm"
-            hx-post="/api/sync/trigger"
-            hx-vals='{"account": "work"}'
-            hx-swap="none"
-            hx-indicator="#sync-indicator">
-            Sync Now
-          </button>
-        </div>
-        <div class="sync-status">
-          <div class="sync-account">
-            <span class="sync-label">Personal Account</span>
-            <span class="sync-time">${formatSyncStatus(personalSync?.lastSync ?? null)}</span>
-          </div>
-          <button
-            class="btn btn-sm"
-            hx-post="/api/sync/trigger"
-            hx-vals='{"account": "personal"}'
-            hx-swap="none"
-            hx-indicator="#sync-indicator">
-            Sync Now
-          </button>
-        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem;">
+          <thead>
+            <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
+              <th style="padding: 0.5rem 0;">Account</th>
+              <th style="padding: 0.5rem 0;">Last Run</th>
+              <th style="padding: 0.5rem 0;">Processing</th>
+              <th style="padding: 0.5rem 0;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 0.5rem 0;">Work</td>
+              <td style="padding: 0.5rem 0;">${formatLastRun(workSync?.lastSync ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchCurrentDate ?? null)}</td>
+              <td style="padding: 0.5rem 0;">
+                <button
+                  class="btn btn-sm"
+                  hx-post="/api/sync/trigger"
+                  hx-vals='{"account": "work"}'
+                  hx-swap="none"
+                  hx-indicator="#sync-indicator">
+                  Sync
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 0.5rem 0;">Personal</td>
+              <td style="padding: 0.5rem 0;">${formatLastRun(personalSync?.lastSync ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchCurrentDate ?? null)}</td>
+              <td style="padding: 0.5rem 0;">
+                <button
+                  class="btn btn-sm"
+                  hx-post="/api/sync/trigger"
+                  hx-vals='{"account": "personal"}'
+                  hx-swap="none"
+                  hx-indicator="#sync-indicator">
+                  Sync
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
         <div id="sync-indicator" class="htmx-indicator">Syncing...</div>
-        <p style="margin-top: 1rem; font-size: 0.875rem; color: #666;">
+        <p style="margin-top: 0.5rem; font-size: 0.875rem; color: #666;">
           ⚡ Cron runs every minute during catch-up. Change to 15min after.
         </p>
         `,
