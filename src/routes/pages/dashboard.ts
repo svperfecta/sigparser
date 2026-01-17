@@ -12,12 +12,20 @@ dashboard.get('/', async (c) => {
   const userEmail = c.get('userEmail') as string | undefined;
 
   // Get stats from database
-  const [syncStatus, companyCount, contactCount, emailCount] = await Promise.all([
-    getSyncStatus(c.env.DB),
-    c.env.DB.prepare('SELECT COUNT(*) as count FROM companies').first<{ count: number }>(),
-    c.env.DB.prepare('SELECT COUNT(*) as count FROM contacts').first<{ count: number }>(),
-    c.env.DB.prepare('SELECT COUNT(*) as count FROM emails').first<{ count: number }>(),
-  ]);
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [syncStatus, companyCount, contactCount, emailCount, newContacts24h, newCompanies24h] =
+    await Promise.all([
+      getSyncStatus(c.env.DB),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM companies').first<{ count: number }>(),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM contacts').first<{ count: number }>(),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM emails').first<{ count: number }>(),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM contacts WHERE created_at >= ?')
+        .bind(oneDayAgo)
+        .first<{ count: number }>(),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM companies WHERE created_at >= ?')
+        .bind(oneDayAgo)
+        .first<{ count: number }>(),
+    ]);
 
   const workSync = syncStatus.find((s) => s.account === 'work');
   const personalSync = syncStatus.find((s) => s.account === 'personal');
@@ -30,12 +38,39 @@ dashboard.get('/', async (c) => {
     return date.toLocaleString();
   };
 
+  // Find most recent sync time
+  const lastSyncTime = [workSync?.lastSync, personalSync?.lastSync]
+    .filter((t): t is string => t !== null && t !== undefined)
+    .sort()
+    .reverse()[0];
+
+  const formatLastSync = (lastSync: string | undefined): string => {
+    if (lastSync === undefined) {
+      return 'Never';
+    }
+    const date = new Date(lastSync);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
+
   const content = `
     ${pageHeader('Dashboard', 'Your contact intelligence at a glance')}
 
     <div class="stats-grid">
-      ${statCard('Companies', companyCount?.count ?? 0)}
-      ${statCard('Contacts', contactCount?.count ?? 0)}
+      ${statCard('Last Sync', formatLastSync(lastSyncTime))}
+      ${statCard('New Contacts (24h)', newContacts24h?.count ?? 0)}
+      ${statCard('New Companies (24h)', newCompanies24h?.count ?? 0)}
+    </div>
+
+    <div class="stats-grid" style="margin-top: 1rem;">
+      ${statCard('Total Companies', companyCount?.count ?? 0)}
+      ${statCard('Total Contacts', contactCount?.count ?? 0)}
       ${statCard('Email Addresses', emailCount?.count ?? 0)}
     </div>
 
