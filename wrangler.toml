@@ -1,0 +1,31 @@
+name = "sigparser"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sigparser-db"
+database_id = "TO_BE_CONFIGURED"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "TO_BE_CONFIGURED"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[site]
+bucket = "./static"
+
+# Development overrides
+[env.dev]
+vars = { ENVIRONMENT = "development" }
+
+[env.dev.d1_databases]
+binding = "DB"
+database_name = "sigparser-db"
+database_id = "local"
