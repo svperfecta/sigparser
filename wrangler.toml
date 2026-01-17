@@ -9,11 +9,11 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "sigparser-db"
-database_id = "TO_BE_CONFIGURED"
+database_id = "983a84bf-3a80-47d6-badc-e2ecbcf8d57f"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "TO_BE_CONFIGURED"
+id = "9ee38f66272841f684bf6973f2680bd3"
 
 [triggers]
 crons = ["*/15 * * * *"]
