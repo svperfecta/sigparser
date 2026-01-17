@@ -45,6 +45,7 @@ export function layout(content: string, options: LayoutOptions = {}): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/htmx.min.js"></script>
 </head>

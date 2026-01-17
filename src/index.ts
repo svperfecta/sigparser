@@ -44,8 +44,33 @@ app.use('*', async (c, next) => {
   });
 });
 
-// Serve static files from KV (configured in wrangler.toml [site])
-// Static files are automatically served by Cloudflare Workers Sites
+// Serve static files with correct MIME types
+app.get('/static/:filename', async (c) => {
+  const filename = c.req.param('filename');
+
+  // Get the file from the __STATIC_CONTENT binding (Workers Sites)
+  const content = await c.env.__STATIC_CONTENT?.get(filename);
+
+  if (content === null || content === undefined) {
+    return c.text('Not found', 404);
+  }
+
+  // Determine MIME type
+  let contentType = 'application/octet-stream';
+  if (filename.endsWith('.css')) {
+    contentType = 'text/css';
+  } else if (filename.endsWith('.js')) {
+    contentType = 'application/javascript';
+  } else if (filename.endsWith('.html')) {
+    contentType = 'text/html';
+  } else if (filename.endsWith('.svg')) {
+    contentType = 'image/svg+xml';
+  }
+
+  return new Response(content, {
+    headers: { 'Content-Type': contentType },
+  });
+});
 
 // Health check (no auth required)
 app.get('/health', (c) => {
