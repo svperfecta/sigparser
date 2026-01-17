@@ -62,9 +62,12 @@ npm run deploy
 
 ### 1. Google Cloud Console Setup
 
+> **Important**: Use a **personal Google account** (not Google Workspace) to create this project. This allows you to add both Workspace and personal Gmail accounts as test users under one OAuth app.
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select existing)
-3. Enable the **Gmail API**:
+2. Make sure you're signed in with your **personal Google account**
+3. Create a new project (e.g., `sigparser`)
+4. Enable the **Gmail API**:
    - Navigate to **APIs & Services → Library**
    - Search for "Gmail API"
    - Click **Enable**
@@ -72,7 +75,7 @@ npm run deploy
 ### 2. Configure OAuth Consent Screen
 
 1. Go to **APIs & Services → OAuth consent screen**
-2. Select **External** user type (or Internal for Workspace)
+2. Select **External** user type (required to support multiple account types)
 3. Fill in the required fields:
    - App name: `sigparser`
    - User support email: your email
@@ -81,8 +84,12 @@ npm run deploy
    - `openid`
    - `email`
    - `https://www.googleapis.com/auth/gmail.readonly`
-5. Add your email(s) as test users
+5. Add **all** your email addresses as test users:
+   - Your work email (e.g., `you@company.com`)
+   - Your personal Gmail (e.g., `you@gmail.com`)
 6. Save
+
+> **Note**: The app stays in "Testing" mode, so only the emails you explicitly add can authorize. This is fine for personal use.
 
 ### 3. Create OAuth Credentials
 
