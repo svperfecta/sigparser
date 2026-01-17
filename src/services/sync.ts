@@ -49,7 +49,130 @@ export class SyncService {
   }
 
   /**
+   * Run a batch sync - process a limited number of messages starting from oldest
+   * This is designed to be called repeatedly by cron until all messages are synced
+   *
+   * @param maxMessages Maximum messages to process in this batch (default 500)
+   */
+  async batchSync(maxMessages = 500): Promise<SyncResult & { hasMore: boolean }> {
+    this.logger.info('Starting batch sync', {
+      account: this.config.account,
+      maxMessages,
+    });
+
+    const result: SyncResult & { hasMore: boolean } = {
+      messagesProcessed: 0,
+      contactsCreated: 0,
+      companiesCreated: 0,
+      domainsCreated: 0,
+      emailsCreated: 0,
+      errors: [],
+      hasMore: false,
+    };
+
+    // Load blacklist into memory for fast lookups
+    await this.blacklist.loadCache();
+
+    // Get current history ID first
+    const profile = await this.config.gmail.getProfile();
+
+    // No query filter - we'll skip already processed messages
+
+    let pageToken: string | undefined;
+    let allMessageIds: string[] = [];
+
+    // First, collect message IDs up to our limit
+    do {
+      const listResponse = await this.config.gmail.listMessages({
+        pageToken,
+        maxResults: 100,
+      });
+
+      if (listResponse.messages === undefined || listResponse.messages.length === 0) {
+        break;
+      }
+
+      allMessageIds = allMessageIds.concat(listResponse.messages.map((m) => m.id));
+      pageToken = listResponse.nextPageToken;
+
+      // Stop if we have enough
+      if (allMessageIds.length >= maxMessages) {
+        result.hasMore = pageToken !== undefined || allMessageIds.length > maxMessages;
+        allMessageIds = allMessageIds.slice(0, maxMessages);
+        break;
+      }
+    } while (pageToken !== undefined);
+
+    if (allMessageIds.length === 0) {
+      this.logger.info('No messages to process', { account: this.config.account });
+      await this.updateSyncState(profile.historyId);
+      return result;
+    }
+
+    this.logger.info('Fetching messages', {
+      count: allMessageIds.length,
+      account: this.config.account,
+    });
+
+    // Batch fetch message metadata
+    const messages = await this.config.gmail.batchGetMessages(allMessageIds);
+
+    // Sort by internal date (oldest first)
+    messages.sort((a, b) => {
+      const dateA = parseInt(a.internalDate ?? '0', 10);
+      const dateB = parseInt(b.internalDate ?? '0', 10);
+      return dateA - dateB;
+    });
+
+    // Process each message (skip already processed ones)
+    for (const message of messages) {
+      // Skip if already processed
+      const alreadyProcessed = await this.isMessageProcessed(message.id);
+      if (alreadyProcessed) {
+        continue;
+      }
+
+      try {
+        const processed = await this.processMessage(message);
+        result.messagesProcessed++;
+        result.contactsCreated += processed.contactsCreated;
+        result.companiesCreated += processed.companiesCreated;
+        result.domainsCreated += processed.domainsCreated;
+        result.emailsCreated += processed.emailsCreated;
+
+        // Mark as processed
+        await this.markMessageProcessed(message.id);
+      } catch (error) {
+        result.errors.push({
+          messageId: message.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Log progress every 100 messages
+      if (result.messagesProcessed % 100 === 0) {
+        this.logger.info('Batch sync progress', {
+          processed: result.messagesProcessed,
+          total: messages.length,
+          account: this.config.account,
+        });
+      }
+    }
+
+    // Update sync state
+    await this.updateSyncState(profile.historyId);
+
+    this.logger.info('Batch sync complete', {
+      account: this.config.account,
+      ...result,
+    });
+
+    return result;
+  }
+
+  /**
    * Run a full sync - process all messages in the mailbox
+   * WARNING: This can take a very long time for large mailboxes!
    */
   async fullSync(): Promise<SyncResult> {
     this.logger.info('Starting full sync', { account: this.config.account });

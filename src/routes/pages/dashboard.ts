@@ -106,6 +106,9 @@ dashboard.get('/', async (c) => {
           </button>
         </div>
         <div id="sync-indicator" class="htmx-indicator">Syncing...</div>
+        <p style="margin-top: 1rem; font-size: 0.875rem; color: #666;">
+          ⚡ Cron runs every minute during catch-up. Change to 15min after.
+        </p>
         `,
         'Sync Status',
       )}

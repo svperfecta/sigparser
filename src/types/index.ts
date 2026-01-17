@@ -4,6 +4,7 @@ export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   __STATIC_CONTENT?: KVNamespace;
+  __STATIC_CONTENT_MANIFEST?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   GMAIL_REFRESH_TOKEN_WORK: string;

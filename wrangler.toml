@@ -16,7 +16,7 @@ binding = "KV"
 id = "9ee38f66272841f684bf6973f2680bd3"
 
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["* * * * *"]  # Every minute for initial catch-up
 
 [site]
 bucket = "./static"

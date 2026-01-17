@@ -1,9 +1,13 @@
 import { Hono } from 'hono';
+// @ts-expect-error - Workers Sites manifest is auto-generated
+import manifest from '__STATIC_CONTENT_MANIFEST';
 import type { Env } from './types/index.js';
 import { errorHandler } from './middleware/error.js';
 import { securityHeaders } from './middleware/security.js';
 import { basicAuth } from './middleware/auth.js';
 import { createLogger } from './utils/logger.js';
+import { GmailService } from './services/gmail.js';
+import { SyncService, getSyncStatus } from './services/sync.js';
 
 // Import API routes
 import companiesRoutes from './routes/api/companies.js';
@@ -48,29 +52,46 @@ app.use('*', async (c, next) => {
 // Serve static files with correct MIME types
 app.get('/static/:filename', async (c) => {
   const filename = c.req.param('filename');
+  const assetNamespace = c.env.__STATIC_CONTENT;
 
-  // Get the file from the __STATIC_CONTENT binding (Workers Sites)
-  const content = await c.env.__STATIC_CONTENT?.get(filename);
+  if (assetNamespace === undefined) {
+    return c.text('Static assets not configured', 500);
+  }
 
-  if (content === null || content === undefined) {
+  try {
+    // Parse manifest to find the hashed filename
+    // Workers Sites manifest format: { "styles.css": "styles.abc123.css" }
+    const assetManifest = JSON.parse(manifest) as Record<string, string>;
+    const hashedName = assetManifest[filename];
+    const actualFilename = hashedName ?? filename;
+
+    // Get from KV
+    const content = await assetNamespace.get(actualFilename, 'arrayBuffer');
+    if (content === null) {
+      return c.text('Not found', 404);
+    }
+
+    // Determine MIME type
+    let contentType = 'application/octet-stream';
+    if (filename.endsWith('.css')) {
+      contentType = 'text/css';
+    } else if (filename.endsWith('.js')) {
+      contentType = 'application/javascript';
+    } else if (filename.endsWith('.html')) {
+      contentType = 'text/html';
+    } else if (filename.endsWith('.svg')) {
+      contentType = 'image/svg+xml';
+    }
+
+    return new Response(content, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    });
+  } catch {
     return c.text('Not found', 404);
   }
-
-  // Determine MIME type
-  let contentType = 'application/octet-stream';
-  if (filename.endsWith('.css')) {
-    contentType = 'text/css';
-  } else if (filename.endsWith('.js')) {
-    contentType = 'application/javascript';
-  } else if (filename.endsWith('.html')) {
-    contentType = 'text/html';
-  } else if (filename.endsWith('.svg')) {
-    contentType = 'image/svg+xml';
-  }
-
-  return new Response(content, {
-    headers: { 'Content-Type': contentType },
-  });
 });
 
 // Health check (no auth required) - includes sync status
@@ -125,19 +146,85 @@ app.route('/contacts', contactsPages);
 app.route('/blacklist', blacklistPages);
 
 // Scheduled handler for cron jobs
-const scheduled: ExportedHandlerScheduledHandler<Env> = (event, _env, _ctx) => {
+const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
   const logger = createLogger();
   logger.info('Cron job started', { cron: event.cron });
 
-  // TODO: Implement incremental sync
-  // _ctx.waitUntil(
-  //   Promise.all([
-  //     syncService.incrementalSync('work'),
-  //     syncService.incrementalSync('personal'),
-  //   ])
-  // );
+  // Run batch sync for both accounts
+  const runSync = async (): Promise<void> => {
+    const results = [];
 
-  logger.info('Cron job completed');
+    // Work account
+    if (env.GMAIL_REFRESH_TOKEN_WORK !== undefined && env.MY_EMAIL_WORK !== undefined) {
+      try {
+        const gmail = new GmailService({
+          clientId: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          refreshToken: env.GMAIL_REFRESH_TOKEN_WORK,
+        });
+        const syncService = new SyncService({
+          gmail,
+          db: env.DB,
+          myEmail: env.MY_EMAIL_WORK,
+          account: 'work',
+        });
+
+        // Check if we have a history ID (already synced before)
+        const status = await getSyncStatus(env.DB);
+        const workStatus = status.find((s) => s.account === 'work');
+
+        if (workStatus?.lastHistoryId !== null) {
+          // Incremental sync
+          const result = await syncService.incrementalSync();
+          results.push({ account: 'work', type: 'incremental', ...result });
+        } else {
+          // Batch sync for initial catch-up (500 messages)
+          const result = await syncService.batchSync(500);
+          results.push({ account: 'work', type: 'batch', ...result });
+        }
+      } catch (error) {
+        logger.error('Work sync failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // Personal account
+    if (env.GMAIL_REFRESH_TOKEN_PERSONAL !== undefined && env.MY_EMAIL_PERSONAL !== undefined) {
+      try {
+        const gmail = new GmailService({
+          clientId: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          refreshToken: env.GMAIL_REFRESH_TOKEN_PERSONAL,
+        });
+        const syncService = new SyncService({
+          gmail,
+          db: env.DB,
+          myEmail: env.MY_EMAIL_PERSONAL,
+          account: 'personal',
+        });
+
+        const status = await getSyncStatus(env.DB);
+        const personalStatus = status.find((s) => s.account === 'personal');
+
+        if (personalStatus?.lastHistoryId !== null) {
+          const result = await syncService.incrementalSync();
+          results.push({ account: 'personal', type: 'incremental', ...result });
+        } else {
+          const result = await syncService.batchSync(500);
+          results.push({ account: 'personal', type: 'batch', ...result });
+        }
+      } catch (error) {
+        logger.error('Personal sync failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    logger.info('Cron job completed', { results });
+  };
+
+  ctx.waitUntil(runSync());
 };
 
 export default {

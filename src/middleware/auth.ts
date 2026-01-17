@@ -12,6 +12,13 @@ declare module 'hono' {
  * Uses AUTH_USERNAME and AUTH_PASSWORD from environment (defaults to admin/admin for dev)
  */
 export async function basicAuth(c: Context, next: Next): Promise<Response | void> {
+  // Skip auth for static files and health check
+  const path = c.req.path;
+  if (path.startsWith('/static/') || path === '/health') {
+    await next();
+    return;
+  }
+
   // Development bypass - skip auth when running locally
   const host = c.req.header('Host') ?? '';
   if (host.includes('localhost')) {
