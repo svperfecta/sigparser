@@ -11,6 +11,12 @@ import contactsRoutes from './routes/api/contacts.js';
 import blacklistRoutes from './routes/api/blacklist.js';
 import syncRoutes from './routes/api/sync.js';
 
+// Import page routes
+import dashboardPages from './routes/pages/dashboard.js';
+import companiesPages from './routes/pages/companies.js';
+import contactsPages from './routes/pages/contacts.js';
+import blacklistPages from './routes/pages/blacklist.js';
+
 // Create app with typed environment
 const app = new Hono<{ Bindings: Env }>();
 
@@ -57,43 +63,10 @@ app.route('/api/blacklist', blacklistRoutes);
 app.route('/api/sync', syncRoutes);
 
 // Page Routes (HTMX)
-app.get('/', (c) => {
-  // TODO: Implement dashboard page
-  return c.html(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>sigparser</title>
-      <link rel="stylesheet" href="/static/styles.css">
-      <script src="/static/htmx.min.js"></script>
-    </head>
-    <body>
-      <div class="container">
-        <h1>sigparser</h1>
-        <p>Dashboard coming soon...</p>
-        <p>User: ${c.get('userEmail')}</p>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-app.get('/companies', (c) => {
-  // TODO: Implement companies page
-  return c.html('<h1>Companies</h1><p>Coming soon...</p>');
-});
-
-app.get('/contacts', (c) => {
-  // TODO: Implement contacts page
-  return c.html('<h1>Contacts</h1><p>Coming soon...</p>');
-});
-
-app.get('/blacklist', (c) => {
-  // TODO: Implement blacklist page
-  return c.html('<h1>Blacklist</h1><p>Coming soon...</p>');
-});
+app.route('/', dashboardPages);
+app.route('/companies', companiesPages);
+app.route('/contacts', contactsPages);
+app.route('/blacklist', blacklistPages);
 
 // Scheduled handler for cron jobs
 const scheduled: ExportedHandlerScheduledHandler<Env> = (event, _env, _ctx) => {

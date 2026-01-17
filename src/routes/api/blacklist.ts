@@ -47,6 +47,16 @@ blacklist.post('/', async (c) => {
 });
 
 /**
+ * POST /api/blacklist/seed - Seed personal email domains
+ */
+blacklist.post('/seed', async (c) => {
+  const service = new BlacklistService(c.env.DB);
+  const count = await service.seedPersonalDomains();
+
+  return c.json({ success: true, count, message: `Added ${count} personal email domains` });
+});
+
+/**
  * DELETE /api/blacklist/:domain - Remove domain from blacklist
  */
 blacklist.delete('/:domain', async (c) => {
