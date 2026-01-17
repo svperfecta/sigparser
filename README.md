@@ -81,8 +81,6 @@ npm run deploy
    - User support email: your email
    - Developer contact: your email
 4. Add scopes:
-   - `openid`
-   - `email`
    - `https://www.googleapis.com/auth/gmail.readonly`
 5. Add **all** your email addresses as test users:
    - Your work email (e.g., `you@company.com`)
