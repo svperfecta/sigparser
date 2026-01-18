@@ -10,6 +10,7 @@ ENVIRONMENT = "production"
 binding = "DB"
 database_name = "sigparser-db"
 database_id = "983a84bf-3a80-47d6-badc-e2ecbcf8d57f"
+migrations_dir = "src/db/migrations"
 
 [[kv_namespaces]]
 binding = "KV"
