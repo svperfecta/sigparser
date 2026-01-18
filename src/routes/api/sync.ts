@@ -99,4 +99,56 @@ sync.post('/trigger', async (c) => {
   });
 });
 
+/**
+ * GET /api/sync/test-query - Test Gmail query with timestamp
+ * Query params: ?after=UNIX_TIMESTAMP&before=UNIX_TIMESTAMP&limit=5
+ */
+sync.get('/test-query', async (c) => {
+  const afterTimestamp = c.req.query('after');
+  const beforeTimestamp = c.req.query('before');
+  const limit = parseInt(c.req.query('limit') ?? '5', 10);
+
+  const gmail = new GmailService({
+    clientId: c.env.GOOGLE_CLIENT_ID,
+    clientSecret: c.env.GOOGLE_CLIENT_SECRET,
+    refreshToken: c.env.GMAIL_REFRESH_TOKEN_PERSONAL ?? '',
+  });
+
+  // Build query using Gmail's after: and before: operators (accept Unix timestamps)
+  let query = '';
+  if (afterTimestamp !== undefined) {
+    query += `after:${afterTimestamp} `;
+  }
+  if (beforeTimestamp !== undefined) {
+    query += `before:${beforeTimestamp}`;
+  }
+
+  const result = await gmail.listMessages({
+    maxResults: limit,
+    q: query.trim() || undefined,
+  });
+
+  // Get details of first few messages to see their timestamps
+  const messageDetails = [];
+  if (result.messages !== undefined) {
+    for (const msg of result.messages.slice(0, 3)) {
+      const details = await gmail.getMessage(msg.id);
+      // Note: Gmail's internalDate is Unix timestamp in milliseconds
+      const internalDateMs = parseInt(details.internalDate, 10);
+      messageDetails.push({
+        id: msg.id,
+        internalDateMs,
+        dateISO: new Date(internalDateMs).toISOString(),
+      });
+    }
+  }
+
+  return c.json({
+    query: query.trim(),
+    resultCount: result.messages?.length ?? 0,
+    hasMore: result.nextPageToken !== undefined,
+    messages: messageDetails,
+  });
+});
+
 export default sync;

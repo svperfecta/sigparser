@@ -49,17 +49,17 @@ export class SyncService {
   }
 
   /**
-   * Run a batch sync - process messages one day at a time, oldest first
-   * This is designed to be called repeatedly by cron until all messages are synced
+   * Run a batch sync - process messages using timestamp-based queries
+   * Uses Unix timestamps for precise time-window queries to Gmail
    *
    * @param maxMessages Maximum messages to process per batch (default 25 to stay under subrequest limits)
    */
-  async batchSync(maxMessages = 25): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
+  async batchSync(maxMessages = 25): Promise<SyncResult & { hasMore: boolean; lastTimestamp?: number }> {
     this.logger.info('Starting batch sync', {
       account: this.config.account,
     });
 
-    const result: SyncResult & { hasMore: boolean; currentDate?: string } = {
+    const result: SyncResult & { hasMore: boolean; lastTimestamp?: number } = {
       messagesProcessed: 0,
       contactsCreated: 0,
       companiesCreated: 0,
@@ -78,114 +78,103 @@ export class SyncService {
     // Get the current sync progress
     const syncState = await this.getSyncState();
 
-    // Determine the current date to process (YYYY-MM-DD format)
-    // Default start is 2000-01-01 (earlier than Gmail's 2004 launch to catch imported emails)
-    const currentDate = syncState?.batch_current_date ?? '2000-01-01';
-    const today = new Date().toISOString().slice(0, 10);
+    // Default start: Jan 1, 2000 (946684800 Unix timestamp)
+    // This is earlier than Gmail's 2004 launch to catch imported emails
+    const DEFAULT_START_TIMESTAMP = 946684800;
+    const startTimestamp = syncState?.batch_last_timestamp ?? DEFAULT_START_TIMESTAMP;
+    const nowTimestamp = Math.floor(Date.now() / 1000);
 
-    // If we've caught up to today, we're done with batch sync
-    if (currentDate > today) {
-      this.logger.info('Batch sync complete - caught up to today', {
+    // If we've caught up to within the last hour, we're done with batch sync
+    if (startTimestamp >= nowTimestamp - 3600) {
+      this.logger.info('Batch sync complete - caught up to now', {
         account: this.config.account,
+        lastTimestamp: startTimestamp,
       });
       return result;
     }
 
-    // Parse current date and build Gmail query
-    // Gmail uses YYYY/MM/DD format for after/before
-    const [year, month, day] = currentDate.split('-');
-    const nextDate = this.addDays(currentDate, 1);
-    const [nextYear, nextMonth, nextDay] = nextDate.split('-');
+    // Query with Unix timestamps - get messages after our last processed timestamp
+    // Gmail returns newest first, so we'll get messages and sort them
+    const query = `after:${startTimestamp}`;
 
-    const query = `after:${year}/${month}/${day} before:${nextYear}/${nextMonth}/${nextDay}`;
-
-    this.logger.info('Batch sync query', { query, currentDate, nextDate });
-
-    result.currentDate = currentDate;
-
-    // Get ALL message IDs for this day (just IDs - lightweight)
-    let pageToken: string | undefined;
-    let allMessageIds: string[] = [];
-
-    do {
-      const listResponse = await this.config.gmail.listMessages({
-        pageToken,
-        maxResults: 100,
-        q: query,
-      });
-
-      if (listResponse.messages !== undefined && listResponse.messages.length > 0) {
-        allMessageIds = allMessageIds.concat(listResponse.messages.map((m) => m.id));
-      }
-
-      pageToken = listResponse.nextPageToken;
-    } while (pageToken !== undefined);
-
-    if (allMessageIds.length === 0) {
-      // No messages on this date, advance to next day
-      this.logger.info('No messages on date, advancing', {
-        account: this.config.account,
-        fromDate: currentDate,
-        toDate: nextDate,
-      });
-      await this.updateSyncState(profile.historyId, nextDate);
-      result.hasMore = nextDate <= today;
-      return result;
-    }
-
-    // Filter out already-processed messages
-    const unprocessedIds: string[] = [];
-    for (const id of allMessageIds) {
-      const isProcessed = await this.isMessageProcessed(id);
-      if (!isProcessed) {
-        unprocessedIds.push(id);
-      }
-    }
-
-    if (unprocessedIds.length === 0) {
-      // All messages for this day already processed, advance to next day
-      this.logger.info('All messages processed for date, advancing', {
-        account: this.config.account,
-        fromDate: currentDate,
-        toDate: nextDate,
-        totalMessages: allMessageIds.length,
-      });
-      await this.updateSyncState(profile.historyId, nextDate);
-      result.hasMore = nextDate <= today;
-      return result;
-    }
-
-    // Take only up to maxMessages unprocessed IDs for this batch
-    const batchIds = unprocessedIds.slice(0, maxMessages);
-    const hasMoreMessagesToday = unprocessedIds.length > maxMessages;
-
-    this.logger.info('Fetching messages for date', {
-      totalForDay: allMessageIds.length,
-      unprocessed: unprocessedIds.length,
-      batchSize: batchIds.length,
-      date: currentDate,
-      hasMoreToday: hasMoreMessagesToday,
+    this.logger.info('Batch sync query', {
+      query,
+      startTimestamp,
+      startDate: new Date(startTimestamp * 1000).toISOString(),
       account: this.config.account,
     });
 
-    // Fetch message metadata for this batch
-    const messages = await this.config.gmail.batchGetMessages(batchIds);
-
-    // Sort by internal date (oldest first within the day)
-    messages.sort((a, b) => {
-      const dateA = parseInt(a.internalDate ?? '0', 10);
-      const dateB = parseInt(b.internalDate ?? '0', 10);
-      return dateA - dateB;
+    // Get up to maxMessages * 2 to have some buffer for filtering
+    const listResponse = await this.config.gmail.listMessages({
+      maxResults: maxMessages * 2,
+      q: query,
     });
 
-    // Process each message
-    for (const message of messages) {
-      // Skip if already processed
-      const alreadyProcessed = await this.isMessageProcessed(message.id);
-      if (alreadyProcessed) {
-        continue;
-      }
+    const messageIds = listResponse.messages?.map((m) => m.id) ?? [];
 
+    if (messageIds.length === 0) {
+      // No messages found, we're caught up
+      this.logger.info('No messages found, caught up', {
+        account: this.config.account,
+        lastTimestamp: startTimestamp,
+      });
+      await this.updateSyncStateWithTimestamp(profile.historyId, nowTimestamp);
+      return result;
+    }
+
+    // Fetch message details to get timestamps
+    const messages = await this.config.gmail.batchGetMessages(messageIds);
+
+    // Sort by internalDate (oldest first)
+    // Note: Gmail's internalDate is a Unix timestamp in milliseconds, despite the name
+    messages.sort((a, b) => {
+      const timestampMsA = parseInt(a.internalDate, 10);
+      const timestampMsB = parseInt(b.internalDate, 10);
+      return timestampMsA - timestampMsB;
+    });
+
+    // Filter to only unprocessed messages and take oldest maxMessages
+    const unprocessedMessages = [];
+    for (const message of messages) {
+      if (unprocessedMessages.length >= maxMessages) {
+        break;
+      }
+      const isProcessed = await this.isMessageProcessed(message.id);
+      if (!isProcessed) {
+        unprocessedMessages.push(message);
+      }
+    }
+
+    if (unprocessedMessages.length === 0) {
+      // All fetched messages already processed, advance timestamp
+      const lastMessage = messages[messages.length - 1];
+      const newestTimestamp = lastMessage !== undefined
+        ? Math.floor(parseInt(lastMessage.internalDate, 10) / 1000)
+        : startTimestamp;
+      this.logger.info('All messages in batch already processed, advancing', {
+        account: this.config.account,
+        newTimestamp: newestTimestamp,
+      });
+      await this.updateSyncStateWithTimestamp(profile.historyId, newestTimestamp + 1);
+      result.hasMore = true;
+      return result;
+    }
+
+    const firstUnprocessed = unprocessedMessages[0];
+    this.logger.info('Processing messages', {
+      fetched: messages.length,
+      unprocessed: unprocessedMessages.length,
+      oldestDate: firstUnprocessed !== undefined
+        ? new Date(parseInt(firstUnprocessed.internalDate, 10)).toISOString()
+        : 'unknown',
+      account: this.config.account,
+    });
+
+    // Track the newest timestamp we process (Unix seconds)
+    let newestProcessedTimestamp = startTimestamp;
+
+    // Process each message
+    for (const message of unprocessedMessages) {
       try {
         const processed = await this.processMessage(message);
         result.messagesProcessed++;
@@ -196,57 +185,35 @@ export class SyncService {
 
         // Mark as processed
         await this.markMessageProcessed(message.id);
+
+        // Track newest timestamp (convert from ms to seconds)
+        const messageTimestamp = Math.floor(parseInt(message.internalDate, 10) / 1000);
+        if (messageTimestamp > newestProcessedTimestamp) {
+          newestProcessedTimestamp = messageTimestamp;
+        }
       } catch (error) {
         result.errors.push({
           messageId: message.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
-
-      // Log progress every 100 messages
-      if (result.messagesProcessed % 100 === 0) {
-        this.logger.info('Batch sync progress', {
-          processed: result.messagesProcessed,
-          total: messages.length,
-          date: currentDate,
-          account: this.config.account,
-        });
-      }
     }
 
-    // Only advance to next day if we've processed all messages for today
-    if (!hasMoreMessagesToday) {
-      await this.updateSyncState(profile.historyId, nextDate);
-      this.logger.info('Batch sync complete for date', {
-        account: this.config.account,
-        date: currentDate,
-        nextDate,
-        ...result,
-      });
-    } else {
-      // More messages today, don't advance
-      await this.updateSyncState(profile.historyId, currentDate);
-      this.logger.info('Batch sync progress for date', {
-        account: this.config.account,
-        date: currentDate,
-        hasMoreToday: true,
-        ...result,
-      });
-    }
+    // Update sync state with the newest processed timestamp + 1 second
+    await this.updateSyncStateWithTimestamp(profile.historyId, newestProcessedTimestamp + 1);
+    result.lastTimestamp = newestProcessedTimestamp;
 
-    // There's more to process
-    result.hasMore = hasMoreMessagesToday || nextDate <= today;
+    this.logger.info('Batch sync complete', {
+      account: this.config.account,
+      lastTimestamp: newestProcessedTimestamp,
+      lastDate: new Date(newestProcessedTimestamp * 1000).toISOString(),
+      ...result,
+    });
+
+    // There's more to process if we haven't reached now
+    result.hasMore = newestProcessedTimestamp < nowTimestamp - 3600;
 
     return result;
-  }
-
-  /**
-   * Add days to a date string (YYYY-MM-DD format)
-   */
-  private addDays(dateStr: string, days: number): string {
-    const date = new Date(dateStr + 'T00:00:00Z');
-    date.setUTCDate(date.getUTCDate() + days);
-    return date.toISOString().slice(0, 10);
   }
 
   /**
@@ -590,9 +557,7 @@ export class SyncService {
   }
 
   /**
-   * Update sync state
-   * @param historyId - Gmail history ID for incremental sync
-   * @param batchCurrentDate - Current date being processed in batch sync (YYYY-MM-DD format)
+   * Update sync state (legacy date-based)
    */
   private async updateSyncState(historyId: string, batchCurrentDate?: string): Promise<void> {
     const timestamp = now();
@@ -623,6 +588,28 @@ export class SyncService {
         .bind(this.config.account, historyId, timestamp, timestamp, timestamp)
         .run();
     }
+  }
+
+  /**
+   * Update sync state with timestamp-based tracking
+   * @param historyId - Gmail history ID for incremental sync
+   * @param batchLastTimestamp - Unix timestamp of last processed message
+   */
+  private async updateSyncStateWithTimestamp(historyId: string, batchLastTimestamp: number): Promise<void> {
+    const timestamp = now();
+
+    await this.config.db
+      .prepare(
+        `INSERT INTO sync_state (account, last_history_id, last_sync, batch_last_timestamp, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(account) DO UPDATE SET
+           last_history_id = excluded.last_history_id,
+           last_sync = excluded.last_sync,
+           batch_last_timestamp = excluded.batch_last_timestamp,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(this.config.account, historyId, timestamp, batchLastTimestamp, timestamp, timestamp)
+      .run();
   }
 
   /**
