@@ -151,4 +151,76 @@ sync.get('/test-query', async (c) => {
   });
 });
 
+/**
+ * GET /api/sync/find-oldest - Find the oldest email in the account
+ * Searches backwards from current year to find when emails start
+ */
+sync.get('/find-oldest', async (c) => {
+  const gmail = new GmailService({
+    clientId: c.env.GOOGLE_CLIENT_ID,
+    clientSecret: c.env.GOOGLE_CLIENT_SECRET,
+    refreshToken: c.env.GMAIL_REFRESH_TOKEN_PERSONAL ?? '',
+  });
+
+  const currentYear = new Date().getFullYear();
+
+  // Find oldest year: go backwards until before:YEAR returns no results
+  let oldestYear = currentYear;
+  for (let year = currentYear; year >= 1990; year--) {
+    const result = await gmail.listMessages({
+      maxResults: 1,
+      q: `before:${year}/01/01`,
+    });
+
+    if (result.messages === undefined || result.messages.length === 0) {
+      // No emails before this year, so oldest is this year or later
+      oldestYear = year;
+      break;
+    }
+    // Emails exist before this year, keep going back
+    oldestYear = year - 1;
+  }
+
+  // Find oldest month in that year
+  let oldestMonth = 1;
+  for (let month = 1; month <= 12; month++) {
+    const nextMonth = month === 12 ? `${oldestYear + 1}/01/01` : `${oldestYear}/${String(month + 1).padStart(2, '0')}/01`;
+    const result = await gmail.listMessages({
+      maxResults: 1,
+      q: `after:${oldestYear}/${String(month).padStart(2, '0')}/01 before:${nextMonth}`,
+    });
+
+    if (result.messages !== undefined && result.messages.length > 0) {
+      oldestMonth = month;
+      break;
+    }
+  }
+
+  // Get the actual oldest email in that month
+  const nextMonth = oldestMonth === 12 ? `${oldestYear + 1}/01/01` : `${oldestYear}/${String(oldestMonth + 1).padStart(2, '0')}/01`;
+  const finalResult = await gmail.listMessages({
+    maxResults: 1,
+    q: `after:${oldestYear}/${String(oldestMonth).padStart(2, '0')}/01 before:${nextMonth}`,
+  });
+
+  let oldestEmail = null;
+  if (finalResult.messages !== undefined && finalResult.messages.length > 0) {
+    const details = await gmail.getMessage(finalResult.messages[0].id);
+    const internalDateMs = parseInt(details.internalDate, 10);
+    const emailDate = new Date(internalDateMs);
+    const startDate = new Date(internalDateMs - 2 * 24 * 60 * 60 * 1000);
+    oldestEmail = {
+      id: finalResult.messages[0].id,
+      dateISO: emailDate.toISOString(),
+      suggestedStartDate: startDate.toISOString().slice(0, 10),
+    };
+  }
+
+  return c.json({
+    oldestYear,
+    oldestMonth,
+    oldestEmail,
+  });
+});
+
 export default sync;
