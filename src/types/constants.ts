@@ -39,26 +39,39 @@ export const PERSONAL_EMAIL_DOMAINS = [
 ] as const;
 
 export const TRANSACTIONAL_EMAIL_PATTERNS = [
-  /^noreply@/i,
-  /^no-reply@/i,
-  /^donotreply@/i,
-  /^do-not-reply@/i,
-  /^mailer-daemon@/i,
-  /^notifications?@/i,
+  // No-reply variations (hyphen, underscore, dot, or none)
+  /^no[._-]?reply/i,
+  /^do[._-]?not[._-]?reply/i,
+  // System/automated
+  /^mailer[._-]?daemon@/i,
+  /^postmaster@/i,
+  /^bounce[s]?@/i,
+  /^auto[._-]?reply/i,
+  /^automated/i,
+  // Notifications and alerts
+  /^notification[s]?@/i,
   /^notify@/i,
-  /^alerts?@/i,
+  /^alert[s]?@/i,
+  // Marketing/bulk
   /^news(letter)?@/i,
+  /^marketing@/i,
+  /^promo(tion)?s?@/i,
+  /^campaign[s]?@/i,
+  // Generic department addresses
   /^support@/i,
   /^info@/i,
   /^sales@/i,
-  /^marketing@/i,
   /^hello@/i,
   /^contact@/i,
   /^team@/i,
   /^feedback@/i,
   /^billing@/i,
-  /^subscriptions?@/i,
-  /^updates?@/i,
+  /^subscription[s]?@/i,
+  /^update[s]?@/i,
+  /^service@/i,
+  /^help@/i,
+  /^admin@/i,
+  /^webmaster@/i,
 ] as const;
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] as const;
