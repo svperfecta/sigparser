@@ -112,7 +112,18 @@ contacts.get('/:id', async (c) => {
   ]);
 
   const content = `
-    ${pageHeader(contact.name ?? '(Unnamed Contact)')}
+    <div class="page-header-with-actions">
+      ${pageHeader(contact.name ?? '(Unnamed Contact)')}
+      <button
+        class="btn btn-danger"
+        hx-delete="/api/contacts/${id}"
+        hx-confirm="Delete this contact and all their email addresses?"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) { window.location.href = '/contacts'; }">
+        Delete Contact
+      </button>
+    </div>
 
     <div class="detail-grid">
       <div class="detail-item">

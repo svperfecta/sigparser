@@ -118,7 +118,18 @@ companies.get('/:id', async (c) => {
   ]);
 
   const content = `
-    ${pageHeader(company.name ?? '(Unnamed Company)')}
+    <div class="page-header-with-actions">
+      ${pageHeader(company.name ?? '(Unnamed Company)')}
+      <button
+        class="btn btn-danger"
+        hx-delete="/api/companies/${id}"
+        hx-confirm="Delete this company? This will blacklist all its domains and remove all associated contacts."
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) { window.location.href = '/companies'; }">
+        Delete Company
+      </button>
+    </div>
 
     <div class="detail-grid">
       <div class="detail-item">

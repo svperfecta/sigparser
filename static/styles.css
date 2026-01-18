@@ -355,6 +355,18 @@ input:focus, select:focus {
   font-size: 0.875rem;
 }
 
+.page-header-with-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.page-header-with-actions .page-header {
+  margin-bottom: 0;
+}
+
 /* Card Styles */
 .card-header {
   border-bottom: 1px solid #e5e7eb;

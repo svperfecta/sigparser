@@ -3,6 +3,7 @@ import type { Env } from '../../types/index.js';
 import { CompanyRepository } from '../../repositories/company.js';
 import { ContactRepository } from '../../repositories/contact.js';
 import { DomainRepository } from '../../repositories/domain.js';
+import { BlacklistService } from '../../services/blacklist.js';
 import { parsePagination, paginationMeta } from '../../utils/pagination.js';
 import { AppError } from '../../middleware/error.js';
 
@@ -83,6 +84,57 @@ companies.get('/:id/contacts', async (c) => {
   return c.json({
     data: contacts,
     pagination: paginationMeta(pagination.page, pagination.limit, total),
+  });
+});
+
+/**
+ * DELETE /api/companies/:id - Delete company and blacklist its domains
+ * This will:
+ * 1. Add all company domains to the blacklist
+ * 2. Delete all emails for contacts at this company
+ * 3. Delete all contacts at this company
+ * 4. Delete all domains for this company
+ * 5. Delete the company
+ */
+companies.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  const companyRepo = new CompanyRepository(c.env.DB);
+  const domainRepo = new DomainRepository(c.env.DB);
+  const blacklist = new BlacklistService(c.env.DB);
+
+  // Verify company exists
+  const company = await companyRepo.findById(id);
+  if (company === null) {
+    throw new AppError('Company not found', 'NOT_FOUND', 404);
+  }
+
+  // Get domains to blacklist
+  const domains = await domainRepo.findByCompanyId(id);
+
+  // Add domains to blacklist
+  for (const domain of domains) {
+    await blacklist.add(domain.domain, 'manual', 'company-delete');
+  }
+
+  // Delete in order: emails -> contacts -> domains -> company
+  // Using raw SQL for cascade delete since we don't have cascade constraints
+  await c.env.DB.batch([
+    // Delete emails for contacts at this company
+    c.env.DB.prepare(
+      'DELETE FROM emails WHERE contact_id IN (SELECT id FROM contacts WHERE company_id = ?)',
+    ).bind(id),
+    // Delete contacts
+    c.env.DB.prepare('DELETE FROM contacts WHERE company_id = ?').bind(id),
+    // Delete domains
+    c.env.DB.prepare('DELETE FROM domains WHERE company_id = ?').bind(id),
+    // Delete company
+    c.env.DB.prepare('DELETE FROM companies WHERE id = ?').bind(id),
+  ]);
+
+  return c.json({
+    success: true,
+    message: `Deleted company and blacklisted ${domains.length} domain(s)`,
+    blacklistedDomains: domains.map((d) => d.domain),
   });
 });
 

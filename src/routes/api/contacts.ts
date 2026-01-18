@@ -60,4 +60,29 @@ contacts.get('/:id/threads', async (c) => {
   return c.json({ data: contact.recentThreads });
 });
 
+/**
+ * DELETE /api/contacts/:id - Delete a contact and their emails
+ */
+contacts.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  const repo = new ContactRepository(c.env.DB);
+
+  // Verify contact exists
+  const contact = await repo.findById(id);
+  if (contact === null) {
+    throw new AppError('Contact not found', 'NOT_FOUND', 404);
+  }
+
+  // Delete emails first, then contact
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM emails WHERE contact_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM contacts WHERE id = ?').bind(id),
+  ]);
+
+  return c.json({
+    success: true,
+    message: 'Contact deleted',
+  });
+});
+
 export default contacts;
