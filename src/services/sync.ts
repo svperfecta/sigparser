@@ -93,37 +93,83 @@ export class SyncService {
       return result;
     }
 
-    // Query with Unix timestamps - get messages after our last processed timestamp
-    // Gmail returns newest first, so we'll get messages and sort them
-    const query = `after:${startTimestamp}`;
+    // Query with a 1-day time window to ensure we get ALL messages for that period
+    // Without `before:`, Gmail returns newest-first and we'd skip old emails!
+    const WINDOW_SECONDS = 24 * 60 * 60; // 1 day
+    const endTimestamp = Math.min(startTimestamp + WINDOW_SECONDS, nowTimestamp);
+    const query = `after:${startTimestamp} before:${endTimestamp}`;
 
     this.logger.info('Batch sync query', {
       query,
       startTimestamp,
+      endTimestamp,
       startDate: new Date(startTimestamp * 1000).toISOString(),
+      endDate: new Date(endTimestamp * 1000).toISOString(),
       account: this.config.account,
     });
 
-    // Get up to maxMessages * 2 to have some buffer for filtering
-    const listResponse = await this.config.gmail.listMessages({
-      maxResults: maxMessages * 2,
-      q: query,
-    });
+    // Get ALL message IDs within this time window (paginate fully)
+    // This ensures we don't miss any messages in the window
+    let allMessageIds: string[] = [];
+    let pageToken: string | undefined;
 
-    const messageIds = listResponse.messages?.map((m) => m.id) ?? [];
+    do {
+      const listResponse = await this.config.gmail.listMessages({
+        maxResults: 100,
+        pageToken,
+        q: query,
+      });
+
+      if (listResponse.messages !== undefined && listResponse.messages.length > 0) {
+        allMessageIds = allMessageIds.concat(listResponse.messages.map((m) => m.id));
+      }
+
+      pageToken = listResponse.nextPageToken;
+    } while (pageToken !== undefined);
+
+    const messageIds = allMessageIds;
 
     if (messageIds.length === 0) {
-      // No messages found, we're caught up
-      this.logger.info('No messages found, caught up', {
+      // No messages in this time window, advance to end of window
+      this.logger.info('No messages in window, advancing', {
         account: this.config.account,
-        lastTimestamp: startTimestamp,
+        startTimestamp,
+        endTimestamp,
       });
-      await this.updateSyncStateWithTimestamp(profile.historyId, nowTimestamp);
+      await this.updateSyncStateWithTimestamp(profile.historyId, endTimestamp);
+      result.hasMore = endTimestamp < nowTimestamp - 3600;
       return result;
     }
 
-    // Fetch message details to get timestamps
-    const messages = await this.config.gmail.batchGetMessages(messageIds);
+    // Filter out already-processed message IDs BEFORE fetching details
+    // This saves subrequests - we only fetch details for messages we'll actually process
+    const unprocessedIds: string[] = [];
+    for (const id of messageIds) {
+      const isProcessed = await this.isMessageProcessed(id);
+      if (!isProcessed) {
+        unprocessedIds.push(id);
+      }
+    }
+
+    if (unprocessedIds.length === 0) {
+      // All messages in this window are processed, advance to next window
+      this.logger.info('All messages in window processed, advancing to next window', {
+        account: this.config.account,
+        totalInWindow: messageIds.length,
+        endTimestamp,
+        endDate: new Date(endTimestamp * 1000).toISOString(),
+      });
+      await this.updateSyncStateWithTimestamp(profile.historyId, endTimestamp);
+      result.hasMore = endTimestamp < nowTimestamp - 3600;
+      result.lastTimestamp = endTimestamp;
+      return result;
+    }
+
+    // Only fetch details for the messages we're going to process (maxMessages)
+    // We need to fetch a few extra to sort and pick the oldest ones
+    // Fetch up to maxMessages * 2 to have buffer for sorting
+    const idsToFetch = unprocessedIds.slice(0, maxMessages * 2);
+    const messages = await this.config.gmail.batchGetMessages(idsToFetch);
 
     // Sort by internalDate (oldest first)
     // Note: Gmail's internalDate is a Unix timestamp in milliseconds, despite the name
@@ -133,48 +179,27 @@ export class SyncService {
       return timestampMsA - timestampMsB;
     });
 
-    // Filter to only unprocessed messages and take oldest maxMessages
-    const unprocessedMessages = [];
-    for (const message of messages) {
-      if (unprocessedMessages.length >= maxMessages) {
-        break;
-      }
-      const isProcessed = await this.isMessageProcessed(message.id);
-      if (!isProcessed) {
-        unprocessedMessages.push(message);
-      }
-    }
+    // Take oldest maxMessages to process this batch
+    const messagesToProcess = messages.slice(0, maxMessages);
+    const remainingInWindow = unprocessedIds.length - messagesToProcess.length;
 
-    if (unprocessedMessages.length === 0) {
-      // All fetched messages already processed, advance timestamp
-      const lastMessage = messages[messages.length - 1];
-      const newestTimestamp = lastMessage !== undefined
-        ? Math.floor(parseInt(lastMessage.internalDate, 10) / 1000)
-        : startTimestamp;
-      this.logger.info('All messages in batch already processed, advancing', {
-        account: this.config.account,
-        newTimestamp: newestTimestamp,
-      });
-      await this.updateSyncStateWithTimestamp(profile.historyId, newestTimestamp + 1);
-      result.hasMore = true;
-      return result;
-    }
-
-    const firstUnprocessed = unprocessedMessages[0];
+    const firstMessage = messagesToProcess[0];
     this.logger.info('Processing messages', {
-      fetched: messages.length,
-      unprocessed: unprocessedMessages.length,
-      oldestDate: firstUnprocessed !== undefined
-        ? new Date(parseInt(firstUnprocessed.internalDate, 10)).toISOString()
+      totalInWindow: messageIds.length,
+      unprocessedInWindow: unprocessedIds.length,
+      processingThisBatch: messagesToProcess.length,
+      remainingInWindow,
+      oldestDate: firstMessage !== undefined
+        ? new Date(parseInt(firstMessage.internalDate, 10)).toISOString()
         : 'unknown',
       account: this.config.account,
     });
 
-    // Track the newest timestamp we process (Unix seconds)
+    // Track the newest timestamp we process (for logging)
     let newestProcessedTimestamp = startTimestamp;
 
     // Process each message
-    for (const message of unprocessedMessages) {
+    for (const message of messagesToProcess) {
       try {
         const processed = await this.processMessage(message);
         result.messagesProcessed++;
@@ -199,19 +224,33 @@ export class SyncService {
       }
     }
 
-    // Update sync state with the newest processed timestamp + 1 second
-    await this.updateSyncStateWithTimestamp(profile.historyId, newestProcessedTimestamp + 1);
-    result.lastTimestamp = newestProcessedTimestamp;
+    // IMPORTANT: Only advance to next window if we've processed ALL messages in current window
+    // If there are remaining messages, keep the same startTimestamp so we come back for them
+    if (remainingInWindow === 0) {
+      // All messages in window processed, advance to next window
+      await this.updateSyncStateWithTimestamp(profile.historyId, endTimestamp);
+      result.lastTimestamp = endTimestamp;
+      this.logger.info('Window complete, advancing', {
+        account: this.config.account,
+        endTimestamp,
+        endDate: new Date(endTimestamp * 1000).toISOString(),
+        ...result,
+      });
+    } else {
+      // More messages remain in this window, DON'T advance - we'll come back
+      // Just update the lastTimestamp for display purposes, but keep startTimestamp the same
+      result.lastTimestamp = newestProcessedTimestamp;
+      this.logger.info('Window incomplete, will continue next batch', {
+        account: this.config.account,
+        remaining: remainingInWindow,
+        newestProcessedTimestamp,
+        newestProcessedDate: new Date(newestProcessedTimestamp * 1000).toISOString(),
+        ...result,
+      });
+    }
 
-    this.logger.info('Batch sync complete', {
-      account: this.config.account,
-      lastTimestamp: newestProcessedTimestamp,
-      lastDate: new Date(newestProcessedTimestamp * 1000).toISOString(),
-      ...result,
-    });
-
-    // There's more to process if we haven't reached now
-    result.hasMore = newestProcessedTimestamp < nowTimestamp - 3600;
+    // There's more to process
+    result.hasMore = true;
 
     return result;
   }
