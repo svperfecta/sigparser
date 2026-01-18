@@ -647,14 +647,18 @@ export async function getSyncStatus(
   lastSync: string | null;
   lastHistoryId: string | null;
   batchCurrentDate: string | null;
+  batchLastTimestamp: number | null;
 }[]> {
   const result = await db
-    .prepare('SELECT account, last_sync, last_history_id, batch_current_date FROM sync_state')
+    .prepare(
+      'SELECT account, last_sync, last_history_id, batch_current_date, batch_last_timestamp FROM sync_state',
+    )
     .all<{
       account: string;
       last_sync: string | null;
       last_history_id: string | null;
       batch_current_date: string | null;
+      batch_last_timestamp: number | null;
     }>();
 
   const accounts: AccountType[] = ['work', 'personal'];
@@ -665,6 +669,7 @@ export async function getSyncStatus(
       lastSync: row?.last_sync ?? null,
       lastHistoryId: row?.last_history_id ?? null,
       batchCurrentDate: row?.batch_current_date ?? null,
+      batchLastTimestamp: row?.batch_last_timestamp ?? null,
     };
   });
 

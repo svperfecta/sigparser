@@ -45,15 +45,34 @@ dashboard.get('/', async (c) => {
     return date.toLocaleDateString();
   };
 
-  const formatBatchProgress = (batchDate: string | null): string => {
-    if (batchDate === null) {
-      return 'Not started';
+  /**
+   * Format the batch progress timestamp (Unix seconds) for display
+   * Shows how far back in time we've synced to
+   */
+  const formatBatchProgress = (
+    batchTimestamp: number | null,
+    batchDate: string | null,
+  ): string => {
+    // Prefer timestamp if available
+    if (batchTimestamp !== null) {
+      const nowTimestamp = Math.floor(Date.now() / 1000);
+      // If within last hour, we're caught up
+      if (batchTimestamp >= nowTimestamp - 3600) {
+        return '✓ Caught up!';
+      }
+      // Show the date of the latest processed message
+      const date = new Date(batchTimestamp * 1000);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
-    const today = new Date().toISOString().slice(0, 10);
-    if (batchDate > today) {
-      return '✓ Caught up!';
+    // Fall back to legacy date field
+    if (batchDate !== null) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (batchDate > today) {
+        return '✓ Caught up!';
+      }
+      return batchDate;
     }
-    return batchDate;
+    return 'Not started';
   };
 
   // Find most recent sync time
@@ -100,7 +119,7 @@ dashboard.get('/', async (c) => {
             <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
               <th style="padding: 0.5rem 0;">Account</th>
               <th style="padding: 0.5rem 0;">Last Run</th>
-              <th style="padding: 0.5rem 0;">Processing</th>
+              <th style="padding: 0.5rem 0;">Latest Message</th>
               <th style="padding: 0.5rem 0;"></th>
             </tr>
           </thead>
@@ -108,7 +127,7 @@ dashboard.get('/', async (c) => {
             <tr>
               <td style="padding: 0.5rem 0;">Work</td>
               <td style="padding: 0.5rem 0;">${formatLastRun(workSync?.lastSync ?? null)}</td>
-              <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchCurrentDate ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchLastTimestamp ?? null, workSync?.batchCurrentDate ?? null)}</td>
               <td style="padding: 0.5rem 0;">
                 <button
                   class="btn btn-sm"
@@ -123,7 +142,7 @@ dashboard.get('/', async (c) => {
             <tr>
               <td style="padding: 0.5rem 0;">Personal</td>
               <td style="padding: 0.5rem 0;">${formatLastRun(personalSync?.lastSync ?? null)}</td>
-              <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchCurrentDate ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchLastTimestamp ?? null, personalSync?.batchCurrentDate ?? null)}</td>
               <td style="padding: 0.5rem 0;">
                 <button
                   class="btn btn-sm"

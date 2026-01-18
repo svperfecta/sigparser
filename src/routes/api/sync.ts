@@ -65,13 +65,13 @@ sync.post('/trigger', async (c) => {
   // Check if account has caught up (batch sync complete)
   const status = await getSyncStatus(c.env.DB);
   const accountStatus = status.find((s) => s.account === account);
-  const today = new Date().toISOString().slice(0, 10);
+  const nowTimestamp = Math.floor(Date.now() / 1000);
 
-  // hasCaughtUp = true when batchCurrentDate is in the future (past today)
+  // hasCaughtUp = true when last processed timestamp is within 1 hour of now
   const hasCaughtUp =
     accountStatus !== undefined &&
-    accountStatus.batchCurrentDate !== null &&
-    accountStatus.batchCurrentDate > today;
+    accountStatus.batchLastTimestamp !== null &&
+    accountStatus.batchLastTimestamp >= nowTimestamp - 3600;
 
   // Run appropriate sync type:
   // - full: process all messages (slow, use sparingly)
