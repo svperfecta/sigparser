@@ -48,6 +48,15 @@ export function layout(content: string, options: LayoutOptions = {}): string {
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/htmx.min.js"></script>
+  <script>
+    // Update nav active state on HTMX navigation
+    document.addEventListener('htmx:pushedIntoHistory', function() {
+      const path = window.location.pathname;
+      document.querySelectorAll('.nav-link').forEach(function(link) {
+        link.classList.toggle('active', link.getAttribute('href') === path);
+      });
+    });
+  </script>
 </head>
 <body>
   <div class="app-container">
