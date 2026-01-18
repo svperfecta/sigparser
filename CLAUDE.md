@@ -96,6 +96,37 @@ npm run typecheck         # TypeScript check
 npm run deploy            # Deploy to Cloudflare (production)
 ```
 
+## Database Migrations
+
+Migrations are stored in `src/db/migrations/` and tracked by Cloudflare D1.
+
+### Creating a New Migration
+
+1. Create a new SQL file with incremental numbering: `src/db/migrations/NNNN_description.sql`
+2. Write idempotent SQL (use `IF NOT EXISTS` for CREATE statements, `IF EXISTS` for DROP)
+3. Test locally first, then apply to remote
+
+### Applying Migrations
+
+```bash
+# Local development
+npm run db:migrate
+
+# Production (remote D1)
+npm run db:migrate:remote
+```
+
+### Important Rules
+
+- **NEVER run raw ALTER TABLE commands directly on production** - always use migration files
+- Migrations are tracked in the `d1_migrations` table - wrangler skips already-applied migrations
+- If you manually applied SQL to production, you must insert a record into `d1_migrations`:
+  ```bash
+  wrangler d1 execute sigparser-db --remote \
+    --command="INSERT INTO d1_migrations (name, applied_at) VALUES ('NNNN_name.sql', datetime('now'))"
+  ```
+- The `migrations_dir` is configured in `wrangler.toml` as `src/db/migrations`
+
 ## Architecture
 
 ### Data Flow
