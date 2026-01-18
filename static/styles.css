@@ -536,6 +536,51 @@ input:focus, select:focus {
   color: #64748b;
 }
 
+/* Skeleton Loading */
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-text {
+  height: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-title {
+  height: 1.5rem;
+  width: 60%;
+  margin-bottom: 1rem;
+}
+
+.skeleton-card {
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.skeleton-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.skeleton-row > * {
+  flex: 1;
+}
+
+/* Show skeleton during HTMX requests */
+.htmx-request #main-content > *:not(.skeleton-container) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* Category Badges */
 .badge-personal { background: #e0e7ff; color: #3730a3; }
 .badge-transactional { background: #fef3c7; color: #92400e; }

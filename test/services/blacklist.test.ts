@@ -51,7 +51,12 @@ describe('Transactional Pattern Matching', () => {
   const testCases = [
     { email: 'noreply@company.com', expected: true },
     { email: 'no-reply@company.com', expected: true },
+    { email: 'no_reply@company.com', expected: true },
+    { email: 'no.reply@company.com', expected: true },
     { email: 'donotreply@company.com', expected: true },
+    { email: 'do-not-reply@company.com', expected: true },
+    { email: 'do_not_reply@company.com', expected: true },
+    { email: 'do.not.reply@company.com', expected: true },
     { email: 'notifications@company.com', expected: true },
     { email: 'notification@company.com', expected: true },
     { email: 'alerts@company.com', expected: true },
