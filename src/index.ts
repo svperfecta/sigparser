@@ -172,14 +172,14 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
         // Check if we've caught up (batch sync complete)
         const status = await getSyncStatus(env.DB);
         const workStatus = status.find((s) => s.account === 'work');
-        const nowTimestamp = Math.floor(Date.now() / 1000);
+        const today = new Date().toISOString().slice(0, 10);
 
         // Use batch sync until we've caught up, then switch to incremental
-        // Caught up = last processed timestamp is within 1 hour of now
+        // Caught up = current processing date is past today
         const hasCaughtUp =
           workStatus !== undefined &&
-          workStatus.batchLastTimestamp !== null &&
-          workStatus.batchLastTimestamp >= nowTimestamp - 3600;
+          workStatus.batchCurrentDate !== null &&
+          workStatus.batchCurrentDate > today;
 
         if (hasCaughtUp) {
           // Incremental sync for new messages
@@ -213,14 +213,14 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
         });
 
         const personalStatus = (await getSyncStatus(env.DB)).find((s) => s.account === 'personal');
-        const personalNowTimestamp = Math.floor(Date.now() / 1000);
+        const todayPersonal = new Date().toISOString().slice(0, 10);
 
         // Use batch sync until we've caught up, then switch to incremental
-        // Caught up = last processed timestamp is within 1 hour of now
+        // Caught up = current processing date is past today
         const personalCaughtUp =
           personalStatus !== undefined &&
-          personalStatus.batchLastTimestamp !== null &&
-          personalStatus.batchLastTimestamp >= personalNowTimestamp - 3600;
+          personalStatus.batchCurrentDate !== null &&
+          personalStatus.batchCurrentDate > todayPersonal;
 
         if (personalCaughtUp) {
           const result = await syncService.incrementalSync();
