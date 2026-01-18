@@ -101,6 +101,8 @@ export class SyncService {
 
     // Page token for pagination within this day (null = start from beginning)
     const pageToken = syncState?.batch_page_token ?? undefined;
+    // Current page number (0 = haven't started this day yet)
+    const currentPageNumber = syncState?.batch_page_number ?? 0;
 
     // Build Gmail query for this specific day
     // Gmail date format: YYYY/MM/DD
@@ -132,7 +134,7 @@ export class SyncService {
         currentDate,
         nextDate,
       });
-      await this.updateSyncStateWithDate(profile.historyId, nextDate, null);
+      await this.updateSyncStateWithDate(profile.historyId, nextDate, null, 0);
       result.hasMore = nextDate <= today;
       return result;
     }
@@ -143,7 +145,7 @@ export class SyncService {
         account: this.config.account,
         currentDate,
       });
-      await this.updateSyncStateWithDate(profile.historyId, nextDate, null);
+      await this.updateSyncStateWithDate(profile.historyId, nextDate, null, 0);
       result.hasMore = nextDate <= today;
       return result;
     }
@@ -185,20 +187,23 @@ export class SyncService {
     }
 
     // Update sync state based on whether there are more pages
+    const newPageNumber = currentPageNumber + 1;
     if (listResponse.nextPageToken !== undefined) {
-      // More pages for this day - save the page token
-      await this.updateSyncStateWithDate(profile.historyId, currentDate, listResponse.nextPageToken);
+      // More pages for this day - save the page token and increment page number
+      await this.updateSyncStateWithDate(profile.historyId, currentDate, listResponse.nextPageToken, newPageNumber);
       this.logger.info('Page complete, more pages remain', {
         account: this.config.account,
         currentDate,
+        pageNumber: newPageNumber,
         ...result,
       });
     } else {
-      // No more pages for this day - advance to next day
-      await this.updateSyncStateWithDate(profile.historyId, nextDate, null);
+      // No more pages for this day - advance to next day, reset page number
+      await this.updateSyncStateWithDate(profile.historyId, nextDate, null, 0);
       this.logger.info('Day complete, advancing to next day', {
         account: this.config.account,
         completedDate: currentDate,
+        pagesProcessed: newPageNumber,
         nextDate,
         ...result,
       });
@@ -598,26 +603,29 @@ export class SyncService {
    * @param historyId - Gmail history ID for incremental sync
    * @param batchCurrentDate - Current date being processed (YYYY-MM-DD)
    * @param batchPageToken - Gmail page token for current position in the day (null = start of day)
+   * @param batchPageNumber - Page number within current day (0 = starting fresh)
    */
   private async updateSyncStateWithDate(
     historyId: string,
     batchCurrentDate: string,
     batchPageToken: string | null,
+    batchPageNumber: number,
   ): Promise<void> {
     const timestamp = now();
 
     await this.config.db
       .prepare(
-        `INSERT INTO sync_state (account, last_history_id, last_sync, batch_current_date, batch_page_token, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sync_state (account, last_history_id, last_sync, batch_current_date, batch_page_token, batch_page_number, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account) DO UPDATE SET
            last_history_id = excluded.last_history_id,
            last_sync = excluded.last_sync,
            batch_current_date = excluded.batch_current_date,
            batch_page_token = excluded.batch_page_token,
+           batch_page_number = excluded.batch_page_number,
            updated_at = excluded.updated_at`,
       )
-      .bind(this.config.account, historyId, timestamp, batchCurrentDate, batchPageToken, timestamp, timestamp)
+      .bind(this.config.account, historyId, timestamp, batchCurrentDate, batchPageToken, batchPageNumber, timestamp, timestamp)
       .run();
   }
 
@@ -657,10 +665,11 @@ export async function getSyncStatus(
   lastHistoryId: string | null;
   batchCurrentDate: string | null;
   batchPageToken: string | null;
+  batchPageNumber: number;
 }[]> {
   const result = await db
     .prepare(
-      'SELECT account, last_sync, last_history_id, batch_current_date, batch_page_token FROM sync_state',
+      'SELECT account, last_sync, last_history_id, batch_current_date, batch_page_token, batch_page_number FROM sync_state',
     )
     .all<{
       account: string;
@@ -668,6 +677,7 @@ export async function getSyncStatus(
       last_history_id: string | null;
       batch_current_date: string | null;
       batch_page_token: string | null;
+      batch_page_number: number | null;
     }>();
 
   const accounts: AccountType[] = ['work', 'personal'];
@@ -679,6 +689,7 @@ export async function getSyncStatus(
       lastHistoryId: row?.last_history_id ?? null,
       batchCurrentDate: row?.batch_current_date ?? null,
       batchPageToken: row?.batch_page_token ?? null,
+      batchPageNumber: row?.batch_page_number ?? 0,
     };
   });
 

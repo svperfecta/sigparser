@@ -200,6 +200,7 @@ export interface SyncStateRow {
   last_sync: string | null;
   batch_current_date: string | null;
   batch_page_token: string | null;
+  batch_page_number: number | null;
   created_at: string;
   updated_at: string;
 }

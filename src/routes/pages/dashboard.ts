@@ -47,11 +47,11 @@ dashboard.get('/', async (c) => {
 
   /**
    * Format the batch progress for display
-   * Shows current date being processed and whether there are more pages
+   * Shows current date being processed and page number
    */
   const formatBatchProgress = (
     batchDate: string | null,
-    batchPageToken: string | null,
+    batchPageNumber: number,
   ): string => {
     if (batchDate === null) {
       return 'Not started';
@@ -60,9 +60,11 @@ dashboard.get('/', async (c) => {
     if (batchDate > today) {
       return '✓ Caught up!';
     }
-    // Show date and page indicator
-    const hasMorePages = batchPageToken !== null;
-    return hasMorePages ? `${batchDate} (paging...)` : batchDate;
+    // Show date and page number if processing pages
+    if (batchPageNumber > 0) {
+      return `${batchDate} (page ${batchPageNumber})`;
+    }
+    return batchDate;
   };
 
   // Find most recent sync time
@@ -117,7 +119,7 @@ dashboard.get('/', async (c) => {
             <tr>
               <td style="padding: 0.5rem 0;">Work</td>
               <td style="padding: 0.5rem 0;">${formatLastRun(workSync?.lastSync ?? null)}</td>
-              <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchCurrentDate ?? null, workSync?.batchPageToken ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchCurrentDate ?? null, workSync?.batchPageNumber ?? 0)}</td>
               <td style="padding: 0.5rem 0;">
                 <button
                   class="btn btn-sm"
@@ -132,7 +134,7 @@ dashboard.get('/', async (c) => {
             <tr>
               <td style="padding: 0.5rem 0;">Personal</td>
               <td style="padding: 0.5rem 0;">${formatLastRun(personalSync?.lastSync ?? null)}</td>
-              <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchCurrentDate ?? null, personalSync?.batchPageToken ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchCurrentDate ?? null, personalSync?.batchPageNumber ?? 0)}</td>
               <td style="padding: 0.5rem 0;">
                 <button
                   class="btn btn-sm"
