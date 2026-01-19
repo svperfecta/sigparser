@@ -1,5 +1,5 @@
 import type { BlacklistEntry, BlacklistRow, BlacklistCategory } from '../types/index.js';
-import { PERSONAL_EMAIL_DOMAINS, TRANSACTIONAL_EMAIL_PATTERNS } from '../types/constants.js';
+import { PERSONAL_EMAIL_DOMAINS, TRANSACTIONAL_EMAIL_PATTERNS, WHITELISTED_DOMAINS } from '../types/constants.js';
 import { extractDomain } from '../utils/email.js';
 import { now } from '../utils/date.js';
 
@@ -35,6 +35,14 @@ export class BlacklistService {
    * Check if an email matches transactional patterns
    */
   isTransactional(email: string): boolean {
+    // Check whitelist first - whitelisted domains bypass transactional filters
+    const emailLower = email.toLowerCase();
+    for (const domain of WHITELISTED_DOMAINS) {
+      if (emailLower.includes(`@${domain}`)) {
+        return false;
+      }
+    }
+
     for (const pattern of TRANSACTIONAL_EMAIL_PATTERNS) {
       if (pattern.test(email)) {
         return true;

@@ -76,8 +76,9 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   // Educational institutions
   /\.edu$/i,
   /\.edu\s/i,
-  // 3+ level subdomains (x.y.z.ext) - almost always internal/junk
-  /@[^@]+\.[^.]+\.[^.]+\.[^.]+$/i,
+  // 3+ level subdomains (x.y.z or x.y.z.w) - almost always internal/junk
+  // Matches: foo@sub.domain.com, foo@a.b.c.com (but whitelist can override)
+  /@[^@]+\.[^.]+\.[^.]+$/i,
   // Marketing subdomain patterns (email.company.com, e.company.com, etc.)
   /@email\.[^.]+\.[^.]+$/i,
   /@e\.[^.]+\.[^.]+$/i,
@@ -94,6 +95,11 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   /@campaign\.[^.]+\.[^.]+$/i,
   /@info\.[^.]+\.[^.]+$/i,
   /@messages?\.[^.]+\.[^.]+$/i,
+] as const;
+
+// Domains to whitelist (override transactional patterns)
+export const WHITELISTED_DOMAINS = [
+  'playstation.sony.com',
 ] as const;
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] as const;
