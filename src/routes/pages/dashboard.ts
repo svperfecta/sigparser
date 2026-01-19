@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../types/index.js';
 import { layout, pageHeader, card, statCard } from '../../templates/layout.js';
 import { getSyncStatus } from '../../services/sync.js';
+import { relativeTime } from '../../utils/date.js';
 
 const dashboard = new Hono<{ Bindings: Env }>();
 
@@ -29,21 +30,6 @@ dashboard.get('/', async (c) => {
 
   const workSync = syncStatus.find((s) => s.account === 'work');
   const personalSync = syncStatus.find((s) => s.account === 'personal');
-
-  const formatLastRun = (lastSync: string | null): string => {
-    if (lastSync === null) {
-      return 'Never';
-    }
-    const date = new Date(lastSync);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
 
   /**
    * Format the batch progress for display
@@ -73,26 +59,11 @@ dashboard.get('/', async (c) => {
     .sort()
     .reverse()[0];
 
-  const formatLastSync = (lastSync: string | undefined): string => {
-    if (lastSync === undefined) {
-      return 'Never';
-    }
-    const date = new Date(lastSync);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
-
   const content = `
     ${pageHeader('Dashboard', 'Your contact intelligence at a glance')}
 
     <div class="stats-grid">
-      ${statCard('Last Sync', formatLastSync(lastSyncTime))}
+      ${statCard('Last Sync', relativeTime(lastSyncTime ?? null))}
       ${statCard('New Contacts (24h)', newContacts24h?.count ?? 0)}
       ${statCard('New Companies (24h)', newCompanies24h?.count ?? 0)}
     </div>
@@ -118,7 +89,7 @@ dashboard.get('/', async (c) => {
           <tbody>
             <tr>
               <td style="padding: 0.5rem 0;">Work</td>
-              <td style="padding: 0.5rem 0;">${formatLastRun(workSync?.lastSync ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${relativeTime(workSync?.lastSync ?? null)}</td>
               <td style="padding: 0.5rem 0;">${formatBatchProgress(workSync?.batchCurrentDate ?? null, workSync?.batchPageNumber ?? 0)}</td>
               <td style="padding: 0.5rem 0;">
                 <button
@@ -133,7 +104,7 @@ dashboard.get('/', async (c) => {
             </tr>
             <tr>
               <td style="padding: 0.5rem 0;">Personal</td>
-              <td style="padding: 0.5rem 0;">${formatLastRun(personalSync?.lastSync ?? null)}</td>
+              <td style="padding: 0.5rem 0;">${relativeTime(personalSync?.lastSync ?? null)}</td>
               <td style="padding: 0.5rem 0;">${formatBatchProgress(personalSync?.batchCurrentDate ?? null, personalSync?.batchPageNumber ?? 0)}</td>
               <td style="padding: 0.5rem 0;">
                 <button

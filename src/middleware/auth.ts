@@ -11,7 +11,7 @@ declare module 'hono' {
  * Basic auth middleware
  * Uses AUTH_USERNAME and AUTH_PASSWORD from environment (defaults to admin/admin for dev)
  */
-export async function basicAuth(c: Context, next: Next): Promise<Response | void> {
+export async function basicAuth(c: Context, next: Next): Promise<Response | undefined> {
   // Skip auth for static files and health check
   const path = c.req.path;
   if (path.startsWith('/static/') || path === '/health') {
@@ -68,4 +68,5 @@ export async function basicAuth(c: Context, next: Next): Promise<Response | void
   }
 
   await next();
+  return undefined;
 }

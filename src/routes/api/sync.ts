@@ -69,8 +69,8 @@ sync.post('/trigger', async (c) => {
 
   // hasCaughtUp = true when current processing date is past today
   const hasCaughtUp =
-    accountStatus !== undefined &&
-    accountStatus.batchCurrentDate !== null &&
+    accountStatus?.batchCurrentDate !== null &&
+    accountStatus?.batchCurrentDate !== undefined &&
     accountStatus.batchCurrentDate > today;
 
   // Run appropriate sync type:
@@ -204,13 +204,14 @@ sync.get('/find-oldest', async (c) => {
   });
 
   let oldestEmail = null;
-  if (finalResult.messages !== undefined && finalResult.messages.length > 0) {
-    const details = await gmail.getMessage(finalResult.messages[0].id);
+  const firstMessage = finalResult.messages?.[0];
+  if (firstMessage !== undefined) {
+    const details = await gmail.getMessage(firstMessage.id);
     const internalDateMs = parseInt(details.internalDate, 10);
     const emailDate = new Date(internalDateMs);
     const startDate = new Date(internalDateMs - 2 * 24 * 60 * 60 * 1000);
     oldestEmail = {
-      id: finalResult.messages[0].id,
+      id: firstMessage.id,
       dateISO: emailDate.toISOString(),
       suggestedStartDate: startDate.toISOString().slice(0, 10),
     };

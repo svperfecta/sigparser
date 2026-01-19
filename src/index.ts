@@ -61,7 +61,8 @@ app.get('/static/:filename', async (c) => {
   try {
     // Parse manifest to find the hashed filename
     // Workers Sites manifest format: { "styles.css": "styles.abc123.css" }
-    const assetManifest = JSON.parse(manifest) as Record<string, string>;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const assetManifest: Record<string, string> = JSON.parse(manifest as string);
     const hashedName = assetManifest[filename];
     const actualFilename = hashedName ?? filename;
 
@@ -102,8 +103,8 @@ app.get('/health', async (c) => {
       'SELECT account, last_sync_at, last_history_id FROM sync_state',
     ).all<{ account: string; last_sync_at: string | null; last_history_id: string | null }>();
 
-    const workSync = syncStates.results?.find((s) => s.account === 'work');
-    const personalSync = syncStates.results?.find((s) => s.account === 'personal');
+    const workSync = syncStates.results.find((s) => s.account === 'work');
+    const personalSync = syncStates.results.find((s) => s.account === 'personal');
 
     return c.json({
       status: 'ok',
@@ -145,94 +146,146 @@ app.route('/companies', companiesPages);
 app.route('/contacts', contactsPages);
 app.route('/blacklist', blacklistPages);
 
+// === Sync Result Type ===
+interface SyncRunResult {
+  account: string;
+  type: string;
+  batches: number;
+  messagesProcessed: number;
+  elapsedMs: number;
+}
+
+// Conservative time limit per account (well under 30s CPU limit)
+const MAX_RUNTIME_PER_ACCOUNT_MS = 12000;
+
+/**
+ * Run sync for a single account with batch looping for catch-up
+ */
+async function runAccountSync(
+  env: Env,
+  account: 'work' | 'personal',
+  refreshToken: string,
+  myEmail: string,
+  logger: ReturnType<typeof createLogger>,
+): Promise<SyncRunResult | null> {
+  const accountStart = Date.now();
+  let batchCount = 0;
+  let totalMessages = 0;
+
+  try {
+    const gmail = new GmailService({
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+      refreshToken,
+    });
+    const syncService = new SyncService({
+      gmail,
+      db: env.DB,
+      myEmail,
+      account,
+    });
+
+    // Check if we've caught up (batch sync complete)
+    const status = await getSyncStatus(env.DB);
+    const accountStatus = status.find((s) => s.account === account);
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Caught up = current processing date is past today
+    const hasCaughtUp =
+      accountStatus?.batchCurrentDate !== null &&
+      accountStatus?.batchCurrentDate !== undefined &&
+      accountStatus.batchCurrentDate > today;
+
+    if (hasCaughtUp) {
+      // Incremental sync for new messages (single run)
+      const result = await syncService.incrementalSync();
+      return {
+        account,
+        type: 'incremental',
+        batches: 1,
+        messagesProcessed: result.messagesProcessed,
+        elapsedMs: Date.now() - accountStart,
+      };
+    }
+
+    // Batch sync loop - process multiple batches until time limit
+    let hasMore = true;
+    while (hasMore && Date.now() - accountStart < MAX_RUNTIME_PER_ACCOUNT_MS) {
+      const result = await syncService.batchSync();
+      batchCount++;
+      totalMessages += result.messagesProcessed;
+      hasMore = result.hasMore;
+
+      // Log progress every 5 batches
+      if (batchCount % 5 === 0) {
+        logger.info(`${account} sync progress`, {
+          batches: batchCount,
+          messagesProcessed: totalMessages,
+          currentDate: result.currentDate,
+          elapsedMs: Date.now() - accountStart,
+        });
+      }
+    }
+
+    return {
+      account,
+      type: 'batch',
+      batches: batchCount,
+      messagesProcessed: totalMessages,
+      elapsedMs: Date.now() - accountStart,
+    };
+  } catch (error) {
+    logger.error(`${account} sync failed`, {
+      error: error instanceof Error ? error.message : String(error),
+      batchesCompleted: batchCount,
+      messagesProcessed: totalMessages,
+    });
+
+    // Return partial progress if any batches completed
+    if (batchCount > 0) {
+      return {
+        account,
+        type: 'batch-partial',
+        batches: batchCount,
+        messagesProcessed: totalMessages,
+        elapsedMs: Date.now() - accountStart,
+      };
+    }
+    return null;
+  }
+}
+
 // Scheduled handler for cron jobs
 const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
   const logger = createLogger();
   logger.info('Cron job started', { cron: event.cron });
 
-  // Run batch sync for both accounts
   const runSync = async (): Promise<void> => {
-    const results = [];
+    const results: SyncRunResult[] = [];
 
-    // Work account
-    if (env.GMAIL_REFRESH_TOKEN_WORK !== undefined && env.MY_EMAIL_WORK !== undefined) {
-      try {
-        const gmail = new GmailService({
-          clientId: env.GOOGLE_CLIENT_ID,
-          clientSecret: env.GOOGLE_CLIENT_SECRET,
-          refreshToken: env.GMAIL_REFRESH_TOKEN_WORK,
-        });
-        const syncService = new SyncService({
-          gmail,
-          db: env.DB,
-          myEmail: env.MY_EMAIL_WORK,
-          account: 'work',
-        });
-
-        // Check if we've caught up (batch sync complete)
-        const status = await getSyncStatus(env.DB);
-        const workStatus = status.find((s) => s.account === 'work');
-        const today = new Date().toISOString().slice(0, 10);
-
-        // Use batch sync until we've caught up, then switch to incremental
-        // Caught up = current processing date is past today
-        const hasCaughtUp =
-          workStatus !== undefined &&
-          workStatus.batchCurrentDate !== null &&
-          workStatus.batchCurrentDate > today;
-
-        if (hasCaughtUp) {
-          // Incremental sync for new messages
-          const result = await syncService.incrementalSync();
-          results.push({ account: 'work', type: 'incremental', ...result });
-        } else {
-          // Batch sync for catch-up (one day at a time, oldest first)
-          const result = await syncService.batchSync();
-          results.push({ account: 'work', type: 'batch', ...result });
-        }
-      } catch (error) {
-        logger.error('Work sync failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+    // Work account (credentials are required)
+    const workResult = await runAccountSync(
+      env,
+      'work',
+      env.GMAIL_REFRESH_TOKEN_WORK,
+      env.MY_EMAIL_WORK,
+      logger,
+    );
+    if (workResult !== null) {
+      results.push(workResult);
     }
 
-    // Personal account
+    // Personal account (credentials are optional)
     if (env.GMAIL_REFRESH_TOKEN_PERSONAL !== undefined && env.MY_EMAIL_PERSONAL !== undefined) {
-      try {
-        const gmail = new GmailService({
-          clientId: env.GOOGLE_CLIENT_ID,
-          clientSecret: env.GOOGLE_CLIENT_SECRET,
-          refreshToken: env.GMAIL_REFRESH_TOKEN_PERSONAL,
-        });
-        const syncService = new SyncService({
-          gmail,
-          db: env.DB,
-          myEmail: env.MY_EMAIL_PERSONAL,
-          account: 'personal',
-        });
-
-        const personalStatus = (await getSyncStatus(env.DB)).find((s) => s.account === 'personal');
-        const todayPersonal = new Date().toISOString().slice(0, 10);
-
-        // Use batch sync until we've caught up, then switch to incremental
-        // Caught up = current processing date is past today
-        const personalCaughtUp =
-          personalStatus !== undefined &&
-          personalStatus.batchCurrentDate !== null &&
-          personalStatus.batchCurrentDate > todayPersonal;
-
-        if (personalCaughtUp) {
-          const result = await syncService.incrementalSync();
-          results.push({ account: 'personal', type: 'incremental', ...result });
-        } else {
-          const result = await syncService.batchSync();
-          results.push({ account: 'personal', type: 'batch', ...result });
-        }
-      } catch (error) {
-        logger.error('Personal sync failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
+      const personalResult = await runAccountSync(
+        env,
+        'personal',
+        env.GMAIL_REFRESH_TOKEN_PERSONAL,
+        env.MY_EMAIL_PERSONAL,
+        logger,
+      );
+      if (personalResult !== null) {
+        results.push(personalResult);
       }
     }
 
