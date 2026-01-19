@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PERSONAL_EMAIL_DOMAINS, TRANSACTIONAL_EMAIL_PATTERNS } from '../../src/types/constants.js';
+import { PERSONAL_EMAIL_DOMAINS, TRANSACTIONAL_EMAIL_PATTERNS, WHITELISTED_DOMAINS } from '../../src/types/constants.js';
 
 describe('Blacklist Constants', () => {
   describe('PERSONAL_EMAIL_DOMAINS', () => {
@@ -72,6 +72,22 @@ describe('Transactional Pattern Matching', () => {
     { email: 'john.smith@company.com', expected: false },
     { email: 'ceo@company.com', expected: false },
     { email: 'engineering@company.com', expected: false },
+    // root@ pattern
+    { email: 'root@server.com', expected: true },
+    // .edu filter
+    { email: 'student@university.edu', expected: true },
+    { email: 'professor@mit.edu', expected: true },
+    // 3-level subdomain filter
+    { email: 'john@mail.company.com', expected: true },
+    { email: 'john@email.company.com', expected: true },
+    { email: 'john@e.company.com', expected: true },
+    // Marketing subdomain patterns
+    { email: 'promo@t.company.com', expected: true },
+    { email: 'news@action.company.com', expected: true },
+    { email: 'alert@notifications.company.com', expected: true },
+    // Regular 2-level domains should NOT match subdomain filter
+    { email: 'john@company.com', expected: false },
+    { email: 'jane@activision.com', expected: false },
   ];
 
   for (const { email, expected } of testCases) {
@@ -80,4 +96,10 @@ describe('Transactional Pattern Matching', () => {
       expect(isTransactional).toBe(expected);
     });
   }
+});
+
+describe('Whitelist', () => {
+  it('contains playstation.sony.com', () => {
+    expect(WHITELISTED_DOMAINS).toContain('playstation.sony.com');
+  });
 });

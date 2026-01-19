@@ -40,6 +40,16 @@ describe('parseEmailHeader', () => {
     expect(parseEmailHeader('')).toEqual([]);
     expect(parseEmailHeader('not-an-email')).toEqual([]);
   });
+
+  it('parses email with trailing parenthesized name', () => {
+    const result = parseEmailHeader('john@acme.com (John Smith)');
+    expect(result).toEqual([{ email: 'john@acme.com', name: 'John Smith', domain: 'acme.com' }]);
+  });
+
+  it('parses email with quoted trailing name', () => {
+    const result = parseEmailHeader('john@acme.com ("John Smith")');
+    expect(result).toEqual([{ email: 'john@acme.com', name: '"John Smith"', domain: 'acme.com' }]);
+  });
 });
 
 describe('extractDomain', () => {
@@ -54,6 +64,14 @@ describe('extractDomain', () => {
   it('returns null for invalid email', () => {
     expect(extractDomain('invalid')).toBeNull();
     expect(extractDomain('invalid@')).toBeNull();
+  });
+
+  it('strips trailing parenthesized name from domain', () => {
+    expect(extractDomain('john@acme.com (John Smith)')).toBe('acme.com');
+  });
+
+  it('strips trailing whitespace from domain', () => {
+    expect(extractDomain('john@acme.com ')).toBe('acme.com');
   });
 });
 
