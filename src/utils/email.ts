@@ -97,6 +97,27 @@ function parseSingleEmail(input: string): ParsedEmail | null {
     };
   }
 
+  // Try format: "email@domain.com (Name)" - name in parentheses after email
+  const parenMatch = /^([^\s(]+@[^\s(]+)\s*\(([^)]+)\)/.exec(input);
+  if (parenMatch !== null) {
+    const email = parenMatch[1]?.toLowerCase().trim();
+    const name = parenMatch[2]?.trim() ?? null;
+    if (email === undefined || !isValidEmail(email)) {
+      return null;
+    }
+
+    const domain = extractDomain(email);
+    if (domain === null) {
+      return null;
+    }
+
+    return {
+      email,
+      name: name !== '' ? name : null,
+      domain,
+    };
+  }
+
   // Try format: "email@domain.com"
   const email = input.toLowerCase().trim();
   if (!isValidEmail(email)) {
@@ -117,13 +138,17 @@ function parseSingleEmail(input: string): ParsedEmail | null {
 
 /**
  * Extract domain from an email address
+ * Handles cleanup of any trailing junk like "(name)" or whitespace
  */
 export function extractDomain(email: string): string | null {
-  const atIndex = email.lastIndexOf('@');
-  if (atIndex === -1 || atIndex === email.length - 1) {
+  // First clean the email - remove any trailing (name) or whitespace
+  const cleanEmail = email.split(/[\s(]/)[0] ?? email;
+
+  const atIndex = cleanEmail.lastIndexOf('@');
+  if (atIndex === -1 || atIndex === cleanEmail.length - 1) {
     return null;
   }
-  return email.substring(atIndex + 1).toLowerCase();
+  return cleanEmail.substring(atIndex + 1).toLowerCase();
 }
 
 /**
@@ -146,8 +171,10 @@ export function isValidEmail(email: string): boolean {
 }
 
 /**
- * Normalize an email address (lowercase, trim)
+ * Normalize an email address (lowercase, trim, remove display name junk)
  */
 export function normalizeEmail(email: string): string {
-  return email.toLowerCase().trim();
+  // Remove any trailing (name) or whitespace
+  const clean = email.split(/[\s(]/)[0] ?? email;
+  return clean.toLowerCase().trim();
 }
