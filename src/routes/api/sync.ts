@@ -224,4 +224,64 @@ sync.get('/find-oldest', async (c) => {
   });
 });
 
+/**
+ * GET /api/sync/search - Search Gmail for specific terms
+ * Query params: ?q=activision&account=work&limit=20
+ */
+sync.get('/search', async (c) => {
+  const query = c.req.query('q');
+  const account = c.req.query('account') ?? 'work';
+  const limit = parseInt(c.req.query('limit') ?? '20', 10);
+
+  if (query === undefined || query === '') {
+    throw new AppError('Query parameter q is required', 'VALIDATION_ERROR', 400);
+  }
+
+  const refreshToken = account === 'work'
+    ? c.env.GMAIL_REFRESH_TOKEN_WORK
+    : c.env.GMAIL_REFRESH_TOKEN_PERSONAL;
+
+  if (refreshToken === undefined) {
+    throw new AppError(`${account} account is not configured`, 'VALIDATION_ERROR', 400);
+  }
+
+  const gmail = new GmailService({
+    clientId: c.env.GOOGLE_CLIENT_ID,
+    clientSecret: c.env.GOOGLE_CLIENT_SECRET,
+    refreshToken,
+  });
+
+  const result = await gmail.listMessages({
+    maxResults: limit,
+    q: query,
+  });
+
+  // Get details of messages
+  const messages = [];
+  if (result.messages !== undefined) {
+    for (const msg of result.messages.slice(0, limit)) {
+      const details = await gmail.getMessage(msg.id);
+      const internalDateMs = parseInt(details.internalDate, 10);
+      const from = details.payload.headers.find(h => h.name.toLowerCase() === 'from')?.value ?? '';
+      const to = details.payload.headers.find(h => h.name.toLowerCase() === 'to')?.value ?? '';
+      const subject = details.payload.headers.find(h => h.name.toLowerCase() === 'subject')?.value ?? '';
+      messages.push({
+        id: msg.id,
+        date: new Date(internalDateMs).toISOString(),
+        from,
+        to: to.substring(0, 100),
+        subject: subject.substring(0, 100),
+      });
+    }
+  }
+
+  return c.json({
+    query,
+    account,
+    total: result.messages?.length ?? 0,
+    hasMore: result.nextPageToken !== undefined,
+    messages,
+  });
+});
+
 export default sync;
