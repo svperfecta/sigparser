@@ -73,6 +73,9 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   /^help@/i,
   /^admin@/i,
   /^webmaster@/i,
+  // Educational institutions
+  /\.edu$/i,
+  /\.edu\s/i,
   // Marketing subdomain patterns (email.company.com, e.company.com, etc.)
   /@email\.[^.]+\.[^.]+$/i,
   /@e\.[^.]+\.[^.]+$/i,
