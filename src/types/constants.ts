@@ -76,6 +76,8 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   // Educational institutions
   /\.edu$/i,
   /\.edu\s/i,
+  // 3+ level subdomains (x.y.z.ext) - almost always internal/junk
+  /@[^@]+\.[^.]+\.[^.]+\.[^.]+$/i,
   // Marketing subdomain patterns (email.company.com, e.company.com, etc.)
   /@email\.[^.]+\.[^.]+$/i,
   /@e\.[^.]+\.[^.]+$/i,
