@@ -43,6 +43,7 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   /^no[._-]?reply/i,
   /^do[._-]?not[._-]?reply/i,
   // System/automated
+  /^root@/i,
   /^mailer[._-]?daemon@/i,
   /^postmaster@/i,
   /^bounce[s]?@/i,
@@ -72,6 +73,22 @@ export const TRANSACTIONAL_EMAIL_PATTERNS = [
   /^help@/i,
   /^admin@/i,
   /^webmaster@/i,
+  // Marketing subdomain patterns (email.company.com, e.company.com, etc.)
+  /@email\.[^.]+\.[^.]+$/i,
+  /@e\.[^.]+\.[^.]+$/i,
+  /@t\.[^.]+\.[^.]+$/i,
+  /@m\.[^.]+\.[^.]+$/i,
+  /@action\.[^.]+\.[^.]+$/i,
+  /@notify\.[^.]+\.[^.]+$/i,
+  /@notifications?\.[^.]+\.[^.]+$/i,
+  /@alerts?\.[^.]+\.[^.]+$/i,
+  /@mail\.[^.]+\.[^.]+$/i,
+  /@news\.[^.]+\.[^.]+$/i,
+  /@promo\.[^.]+\.[^.]+$/i,
+  /@offers?\.[^.]+\.[^.]+$/i,
+  /@campaign\.[^.]+\.[^.]+$/i,
+  /@info\.[^.]+\.[^.]+$/i,
+  /@messages?\.[^.]+\.[^.]+$/i,
 ] as const;
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] as const;
