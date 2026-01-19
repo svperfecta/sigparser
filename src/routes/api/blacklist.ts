@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, BlacklistCategory } from '../../types/index.js';
+import { BLACKLIST_CATEGORIES } from '../../types/constants.js';
 import { BlacklistService } from '../../services/blacklist.js';
 import { AppError } from '../../middleware/error.js';
 
@@ -35,8 +36,7 @@ blacklist.post('/', async (c) => {
   const category = body.category ?? 'manual';
 
   // Validate category
-  const validCategories: BlacklistCategory[] = ['personal', 'transactional', 'spam', 'manual'];
-  if (!validCategories.includes(category)) {
+  if (!BLACKLIST_CATEGORIES.includes(category)) {
     throw new AppError('Invalid category', 'VALIDATION_ERROR', 400);
   }
 

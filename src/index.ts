@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 // @ts-expect-error - Workers Sites manifest is auto-generated
 import manifest from '__STATIC_CONTENT_MANIFEST';
 import type { Env } from './types/index.js';
+import { MIME_TYPES } from './types/constants.js';
 import { errorHandler } from './middleware/error.js';
 import { securityHeaders } from './middleware/security.js';
 import { basicAuth } from './middleware/auth.js';
@@ -72,17 +73,9 @@ app.get('/static/:filename', async (c) => {
       return c.text('Not found', 404);
     }
 
-    // Determine MIME type
-    let contentType = 'application/octet-stream';
-    if (filename.endsWith('.css')) {
-      contentType = 'text/css';
-    } else if (filename.endsWith('.js')) {
-      contentType = 'application/javascript';
-    } else if (filename.endsWith('.html')) {
-      contentType = 'text/html';
-    } else if (filename.endsWith('.svg')) {
-      contentType = 'image/svg+xml';
-    }
+    // Determine MIME type from extension
+    const ext = filename.substring(filename.lastIndexOf('.'));
+    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
 
     return new Response(content, {
       headers: {

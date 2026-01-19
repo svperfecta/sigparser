@@ -103,3 +103,11 @@ export const WHITELISTED_DOMAINS = [
 ] as const;
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] as const;
+
+// MIME types for static file serving
+export const MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.html': 'text/html',
+  '.svg': 'image/svg+xml',
+};
