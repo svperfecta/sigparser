@@ -25,6 +25,7 @@ export interface SyncResult {
 export interface SyncConfig {
   gmail: GmailService;
   db: D1Database;
+  kv?: KVNamespace;
   myEmail: string;
   account: AccountType;
 }
@@ -40,7 +41,7 @@ export class SyncService {
   private logger: Logger;
 
   constructor(private config: SyncConfig) {
-    this.blacklist = new BlacklistService(config.db);
+    this.blacklist = new BlacklistService(config.db, config.kv);
     this.companies = new CompanyRepository(config.db);
     this.domains = new DomainRepository(config.db);
     this.contacts = new ContactRepository(config.db);
@@ -56,10 +57,11 @@ export class SyncService {
    * - Page = pageSize messages (tracked by batch_page_token)
    *
    * When all pages for a day are processed, advances to the next day.
+   * Progress is saved after each message to survive subrequest limits.
    *
-   * @param pageSize Number of messages per page (default 50 for paid plan with 1000 subrequest limit)
+   * @param pageSize Number of messages per page (default 5 to stay under 1000 subrequest limit)
    */
-  async batchSync(pageSize = 50): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
+  async batchSync(pageSize = 5): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
     this.logger.info('Starting batch sync', {
       account: this.config.account,
     });
@@ -168,6 +170,11 @@ export class SyncService {
         continue;
       }
 
+      // Mark as processed BEFORE processing (optimistic)
+      // If we crash mid-processing, we skip this message on retry
+      // This trades perfect accuracy for reliability and fewer DB ops
+      await this.markMessageProcessed(message.id);
+
       try {
         const processed = await this.processMessage(message);
         result.messagesProcessed++;
@@ -175,9 +182,6 @@ export class SyncService {
         result.companiesCreated += processed.companiesCreated;
         result.domainsCreated += processed.domainsCreated;
         result.emailsCreated += processed.emailsCreated;
-
-        // Mark as processed
-        await this.markMessageProcessed(message.id);
       } catch (error) {
         result.errors.push({
           messageId: message.id,

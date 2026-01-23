@@ -56,6 +56,7 @@ sync.post('/trigger', async (c) => {
   const syncService = new SyncService({
     gmail,
     db: c.env.DB,
+    kv: c.env.KV,
     myEmail,
     account,
   });

@@ -80,19 +80,35 @@ export class DomainRepository {
 
   /**
    * Find or create a domain
+   * Optimized to use INSERT OR IGNORE instead of SELECT-then-INSERT
    */
   async findOrCreate(domain: string, companyId: string): Promise<{ domain: Domain; isNew: boolean }> {
-    const existing = await this.findByDomain(domain);
-    if (existing !== null) {
-      return { domain: existing, isNew: false };
+    const timestamp = now();
+    const normalizedDomain = domain.toLowerCase();
+
+    // INSERT OR IGNORE - will do nothing if domain already exists
+    const insertResult = await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO domains (domain, company_id, is_primary, created_at, updated_at)
+         VALUES (?, ?, 0, ?, ?)`,
+      )
+      .bind(normalizedDomain, companyId, timestamp, timestamp)
+      .run();
+
+    const isNew = insertResult.meta.changes > 0;
+
+    // Fetch the domain (whether we just created it or it already existed)
+    const row = await this.db
+      .prepare('SELECT * FROM domains WHERE domain = ?')
+      .bind(normalizedDomain)
+      .first<DomainRow>();
+
+    // Should never be null at this point, but handle gracefully
+    if (row === null) {
+      throw new Error(`Domain ${normalizedDomain} not found after insert`);
     }
 
-    // Check if this is the first domain for the company (make it primary)
-    const existingDomains = await this.findByCompanyId(companyId);
-    const isPrimary = existingDomains.length === 0;
-
-    const newDomain = await this.create(domain, companyId, isPrimary);
-    return { domain: newDomain, isNew: true };
+    return { domain: this.rowToDomain(row), isNew };
   }
 
   /**

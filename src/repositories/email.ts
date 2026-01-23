@@ -74,6 +74,7 @@ export class EmailRepository {
 
   /**
    * Find or create an email record
+   * Optimized to use INSERT OR IGNORE instead of SELECT-then-INSERT
    */
   async findOrCreate(
     email: string,
@@ -81,21 +82,42 @@ export class EmailRepository {
     domain: string,
     nameObserved: string | null,
   ): Promise<{ email: Email; isNew: boolean }> {
-    const existing = await this.findByEmail(email);
-    if (existing !== null) {
-      // Update name if we have a new observation
-      if (nameObserved !== null && existing.nameObserved === null) {
-        await this.db
-          .prepare('UPDATE emails SET name_observed = ?, updated_at = ? WHERE email = ?')
-          .bind(nameObserved, now(), email.toLowerCase())
-          .run();
-        existing.nameObserved = nameObserved;
-      }
-      return { email: existing, isNew: false };
+    const timestamp = now();
+    const normalizedEmail = email.toLowerCase();
+
+    // INSERT OR IGNORE - will do nothing if email already exists
+    const insertResult = await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO emails (email, contact_id, domain, name_observed, recent_threads, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '[]', ?, ?)`,
+      )
+      .bind(normalizedEmail, contactId, domain.toLowerCase(), nameObserved, timestamp, timestamp)
+      .run();
+
+    const isNew = insertResult.meta.changes > 0;
+
+    // Fetch the email (whether we just created it or it already existed)
+    const row = await this.db
+      .prepare('SELECT * FROM emails WHERE email = ?')
+      .bind(normalizedEmail)
+      .first<EmailRow>();
+
+    if (row === null) {
+      throw new Error(`Email ${normalizedEmail} not found after insert`);
     }
 
-    const newEmail = await this.create(email, contactId, domain, nameObserved);
-    return { email: newEmail, isNew: true };
+    const emailEntity = this.rowToEmail(row);
+
+    // If email existed and we have a new name observation, update it
+    if (!isNew && nameObserved !== null && emailEntity.nameObserved === null) {
+      await this.db
+        .prepare('UPDATE emails SET name_observed = ?, updated_at = ? WHERE email = ?')
+        .bind(nameObserved, timestamp, normalizedEmail)
+        .run();
+      emailEntity.nameObserved = nameObserved;
+    }
+
+    return { email: emailEntity, isNew };
   }
 
   /**

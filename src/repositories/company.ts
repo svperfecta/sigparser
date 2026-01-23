@@ -153,19 +153,21 @@ export class CompanyRepository {
 
   /**
    * Find or create a company by domain
+   * Optimized to use single JOIN query instead of 2 separate SELECTs
    */
   async findOrCreateByDomain(domain: string): Promise<{ company: Company; isNew: boolean }> {
-    // Check if domain exists
-    const existingDomain = await this.db
-      .prepare('SELECT company_id FROM domains WHERE domain = ?')
+    // Single query to find company via domain JOIN
+    const existing = await this.db
+      .prepare(
+        `SELECT c.* FROM companies c
+         INNER JOIN domains d ON c.id = d.company_id
+         WHERE d.domain = ?`,
+      )
       .bind(domain)
-      .first<{ company_id: string }>();
+      .first<CompanyRow>();
 
-    if (existingDomain !== null) {
-      const company = await this.findById(existingDomain.company_id);
-      if (company !== null) {
-        return { company, isNew: false };
-      }
+    if (existing !== null) {
+      return { company: this.rowToCompany(existing), isNew: false };
     }
 
     // Create new company with domain as name

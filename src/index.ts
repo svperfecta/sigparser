@@ -93,8 +93,8 @@ app.get('/health', async (c) => {
   try {
     // Get last sync times from sync_state table
     const syncStates = await c.env.DB.prepare(
-      'SELECT account, last_sync_at, last_history_id FROM sync_state',
-    ).all<{ account: string; last_sync_at: string | null; last_history_id: string | null }>();
+      'SELECT account, last_sync, last_history_id FROM sync_state',
+    ).all<{ account: string; last_sync: string | null; last_history_id: string | null }>();
 
     const workSync = syncStates.results.find((s) => s.account === 'work');
     const personalSync = syncStates.results.find((s) => s.account === 'personal');
@@ -104,11 +104,11 @@ app.get('/health', async (c) => {
       timestamp: new Date().toISOString(),
       sync: {
         work: {
-          lastSync: workSync?.last_sync_at ?? null,
+          lastSync: workSync?.last_sync ?? null,
           hasHistoryId: workSync?.last_history_id !== null,
         },
         personal: {
-          lastSync: personalSync?.last_sync_at ?? null,
+          lastSync: personalSync?.last_sync ?? null,
           hasHistoryId: personalSync?.last_history_id !== null,
         },
       },
@@ -174,6 +174,7 @@ async function runAccountSync(
     const syncService = new SyncService({
       gmail,
       db: env.DB,
+      kv: env.KV,
       myEmail,
       account,
     });

@@ -6,12 +6,20 @@ import { now } from '../utils/date.js';
 // Re-export for convenience
 export type { BlacklistCategory } from '../types/index.js';
 
+// KV cache keys
+const BLACKLIST_CACHE_KEY = 'blacklist:domains';
+const BLACKLIST_COUNT_KEY = 'blacklist:count';
+const BLACKLIST_DATE_KEY = 'blacklist:date';
+
 // === Blacklist Service ===
 
 export class BlacklistService {
   private domainCache: Set<string> | null = null;
 
-  constructor(private db: D1Database) {}
+  constructor(
+    private db: D1Database,
+    private kv?: KVNamespace,
+  ) {}
 
   /**
    * Check if an email address should be blacklisted
@@ -71,13 +79,55 @@ export class BlacklistService {
 
   /**
    * Load all blacklisted domains into memory cache
+   * Uses KV for persistence with count-based invalidation
    */
   async loadCache(): Promise<void> {
+    // If already loaded in this invocation, skip
+    if (this.domainCache !== null) {
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Try to load from KV cache if available
+    if (this.kv !== undefined) {
+      const [cachedDomains, cachedCount, cachedDate] = await Promise.all([
+        this.kv.get(BLACKLIST_CACHE_KEY),
+        this.kv.get(BLACKLIST_COUNT_KEY),
+        this.kv.get(BLACKLIST_DATE_KEY),
+      ]);
+
+      // Check if cache is valid (same day and count matches)
+      if (cachedDomains !== null && cachedCount !== null && cachedDate === today) {
+        // Quick count check to see if DB changed
+        const dbCount = await this.db
+          .prepare('SELECT COUNT(*) as count FROM blacklist')
+          .first<{ count: number }>();
+
+        if (dbCount !== null && dbCount.count.toString() === cachedCount) {
+          // Cache is valid, use it
+          this.domainCache = new Set(JSON.parse(cachedDomains) as string[]);
+          return;
+        }
+      }
+    }
+
+    // Cache miss or invalid - load from DB
     const result = await this.db
       .prepare('SELECT domain FROM blacklist')
       .all<{ domain: string }>();
 
-    this.domainCache = new Set(result.results.map((r) => r.domain.toLowerCase()));
+    const domains = result.results.map((r) => r.domain.toLowerCase());
+    this.domainCache = new Set(domains);
+
+    // Save to KV cache if available
+    if (this.kv !== undefined) {
+      await Promise.all([
+        this.kv.put(BLACKLIST_CACHE_KEY, JSON.stringify(domains)),
+        this.kv.put(BLACKLIST_COUNT_KEY, domains.length.toString()),
+        this.kv.put(BLACKLIST_DATE_KEY, today),
+      ]);
+    }
   }
 
   /**
