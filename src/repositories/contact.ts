@@ -1,7 +1,6 @@
 import type { Contact, ContactRow, ContactWithEmails, Email, Company, ThreadReference } from '../types/index.js';
 import { generateId } from '../utils/id.js';
 import { now } from '../utils/date.js';
-import { MAX_THREADS_PER_CONTACT } from '../types/constants.js';
 import type { ParsedPagination } from '../utils/pagination.js';
 
 export class ContactRepository {
@@ -209,9 +208,9 @@ export class ContactRepository {
   }
 
   /**
-   * Update contact stats and add thread reference
+   * Update contact stats (without thread tracking - that's done by a separate job)
    */
-  async updateStatsAndThread(
+  async updateStats(
     id: string,
     stats: {
       emailsTo?: number;
@@ -220,7 +219,6 @@ export class ContactRepository {
       lastSeen?: string;
       firstSeen?: string;
     },
-    thread?: ThreadReference,
   ): Promise<void> {
     const updates: string[] = [];
     const params: (string | number)[] = [];
@@ -244,31 +242,6 @@ export class ContactRepository {
     if (stats.firstSeen !== undefined) {
       updates.push('first_seen = MIN(COALESCE(first_seen, ?), ?)');
       params.push(stats.firstSeen, stats.firstSeen);
-    }
-
-    // Add thread to recent_threads (capped at MAX_THREADS_PER_CONTACT)
-    if (thread !== undefined) {
-      // Get current threads
-      const current = await this.db
-        .prepare('SELECT recent_threads FROM contacts WHERE id = ?')
-        .bind(id)
-        .first<{ recent_threads: string }>();
-
-      if (current !== null) {
-        const threads = JSON.parse(current.recent_threads) as ThreadReference[];
-
-        // Add new thread and deduplicate
-        const existingIndex = threads.findIndex((t) => t.threadId === thread.threadId);
-        if (existingIndex >= 0) {
-          threads.splice(existingIndex, 1);
-        }
-        threads.unshift(thread);
-
-        // Cap at max
-        const capped = threads.slice(0, MAX_THREADS_PER_CONTACT);
-        updates.push('recent_threads = ?');
-        params.push(JSON.stringify(capped));
-      }
     }
 
     if (updates.length === 0) {

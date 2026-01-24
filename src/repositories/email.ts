@@ -1,6 +1,5 @@
 import type { Email, EmailRow, ThreadReference } from '../types/index.js';
 import { now } from '../utils/date.js';
-import { MAX_THREADS_PER_CONTACT } from '../types/constants.js';
 
 export class EmailRepository {
   constructor(private db: D1Database) {}
@@ -121,9 +120,9 @@ export class EmailRepository {
   }
 
   /**
-   * Update email stats and add thread reference
+   * Update email stats (without thread tracking - that's done by a separate job)
    */
-  async updateStatsAndThread(
+  async updateStats(
     email: string,
     stats: {
       emailsTo?: number;
@@ -132,7 +131,6 @@ export class EmailRepository {
       lastSeen?: string;
       firstSeen?: string;
     },
-    thread?: ThreadReference,
   ): Promise<void> {
     const updates: string[] = [];
     const params: (string | number)[] = [];
@@ -156,28 +154,6 @@ export class EmailRepository {
     if (stats.firstSeen !== undefined) {
       updates.push('first_seen = MIN(COALESCE(first_seen, ?), ?)');
       params.push(stats.firstSeen, stats.firstSeen);
-    }
-
-    // Add thread to recent_threads
-    if (thread !== undefined) {
-      const current = await this.db
-        .prepare('SELECT recent_threads FROM emails WHERE email = ?')
-        .bind(email.toLowerCase())
-        .first<{ recent_threads: string }>();
-
-      if (current !== null) {
-        const threads = JSON.parse(current.recent_threads) as ThreadReference[];
-
-        const existingIndex = threads.findIndex((t) => t.threadId === thread.threadId);
-        if (existingIndex >= 0) {
-          threads.splice(existingIndex, 1);
-        }
-        threads.unshift(thread);
-
-        const capped = threads.slice(0, MAX_THREADS_PER_CONTACT);
-        updates.push('recent_threads = ?');
-        params.push(JSON.stringify(capped));
-      }
     }
 
     if (updates.length === 0) {

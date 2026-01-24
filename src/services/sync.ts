@@ -7,7 +7,7 @@ import { EmailRepository } from '../repositories/email.js';
 import { parseEmailHeader, type ParsedEmail } from '../utils/email.js';
 import { now } from '../utils/date.js';
 import { createLogger, type Logger } from '../utils/logger.js';
-import type { SyncStateRow, ThreadReference } from '../types/index.js';
+import type { SyncStateRow } from '../types/index.js';
 
 // === Types ===
 
@@ -457,13 +457,6 @@ export class SyncService {
     const myEmailLower = this.config.myEmail.toLowerCase();
     const fromMe = allEmails.some((e) => e.role === 'from' && e.email === myEmailLower);
 
-    // Create thread reference
-    const thread: ThreadReference = {
-      threadId: message.threadId,
-      account: this.config.account,
-      timestamp: messageDate,
-    };
-
     // Process each email address (excluding self)
     for (const parsed of allEmails) {
       if (parsed.email === myEmailLower) {
@@ -526,12 +519,12 @@ export class SyncService {
         stats.emailsCreated++;
       }
 
-      // Update stats at all levels
+      // Update stats at all levels (thread tracking removed - will be done by separate job)
       await Promise.all([
         this.companies.updateStats(company.id, statUpdate),
         this.domains.updateStats(domain.domain, statUpdate),
-        this.contacts.updateStatsAndThread(contact.id, statUpdate, thread),
-        this.emails.updateStatsAndThread(emailRecord.email, statUpdate, thread),
+        this.contacts.updateStats(contact.id, statUpdate),
+        this.emails.updateStats(emailRecord.email, statUpdate),
       ]);
 
       // Update contact name if we got a better one
