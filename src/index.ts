@@ -148,8 +148,8 @@ interface SyncRunResult {
   elapsedMs: number;
 }
 
-// Conservative time limit per account (well under 30s CPU limit)
-const MAX_RUNTIME_PER_ACCOUNT_MS = 12000;
+// Time limit per account - with parallel execution, can use more of 30s CPU limit
+const MAX_RUNTIME_PER_ACCOUNT_MS = 20000;
 
 /**
  * Run sync for a single account with batch looping for catch-up
@@ -255,34 +255,22 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
   logger.info('Cron job started', { cron: event.cron });
 
   const runSync = async (): Promise<void> => {
-    const results: SyncRunResult[] = [];
+    // Run both accounts in parallel for faster throughput
+    const syncPromises: Promise<SyncRunResult | null>[] = [];
 
     // Work account (credentials are required)
-    const workResult = await runAccountSync(
-      env,
-      'work',
-      env.GMAIL_REFRESH_TOKEN_WORK,
-      env.MY_EMAIL_WORK,
-      logger,
+    syncPromises.push(
+      runAccountSync(env, 'work', env.GMAIL_REFRESH_TOKEN_WORK, env.MY_EMAIL_WORK, logger),
     );
-    if (workResult !== null) {
-      results.push(workResult);
-    }
 
     // Personal account (credentials are optional)
     if (env.GMAIL_REFRESH_TOKEN_PERSONAL !== undefined && env.MY_EMAIL_PERSONAL !== undefined) {
-      const personalResult = await runAccountSync(
-        env,
-        'personal',
-        env.GMAIL_REFRESH_TOKEN_PERSONAL,
-        env.MY_EMAIL_PERSONAL,
-        logger,
+      syncPromises.push(
+        runAccountSync(env, 'personal', env.GMAIL_REFRESH_TOKEN_PERSONAL, env.MY_EMAIL_PERSONAL, logger),
       );
-      if (personalResult !== null) {
-        results.push(personalResult);
-      }
     }
 
+    const results = (await Promise.all(syncPromises)).filter((r): r is SyncRunResult => r !== null);
     logger.info('Cron job completed', { results });
   };
 

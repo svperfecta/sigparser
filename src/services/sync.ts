@@ -48,9 +48,9 @@ export class SyncService {
    * When all pages for a day are processed, advances to the next day.
    * Progress is saved after each message to survive subrequest limits.
    *
-   * @param pageSize Number of messages per page (default 15 - increased after query optimizations)
+   * @param pageSize Number of messages per page (default 30 - increased after batch DB optimizations)
    */
-  async batchSync(pageSize = 15): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
+  async batchSync(pageSize = 30): Promise<SyncResult & { hasMore: boolean; currentDate?: string }> {
     this.logger.info('Starting batch sync', {
       account: this.config.account,
     });
