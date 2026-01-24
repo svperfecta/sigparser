@@ -220,17 +220,13 @@ Gmail API → Sync Engine → D1 Database → REST API → HTMX Frontend
 ## Development
 
 ```bash
-# Run tests
-npm test
-
-# Type check
-npm run typecheck
-
-# Lint
-npm run lint
-
-# Build
-npm run build
+just dev              # Start dev server
+just test             # Run tests
+just check            # Format, lint, typecheck, and test
+just migrate          # Run local migrations
+just migrate-remote   # Run production migrations
+just deploy           # Deploy to Cloudflare
+just logs             # Tail production logs
 ```
 
 ---
