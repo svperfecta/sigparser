@@ -1,10 +1,7 @@
 import { GmailService, getHeader, type GmailMessage } from './gmail.js';
 import { BlacklistService } from './blacklist.js';
-import { CompanyRepository } from '../repositories/company.js';
-import { DomainRepository } from '../repositories/domain.js';
-import { ContactRepository } from '../repositories/contact.js';
-import { EmailRepository } from '../repositories/email.js';
-import { parseEmailHeader, type ParsedEmail } from '../utils/email.js';
+import { parseEmailHeader, extractDomain, type ParsedEmail } from '../utils/email.js';
+import { generateId } from '../utils/id.js';
 import { now } from '../utils/date.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import type { SyncStateRow } from '../types/index.js';
@@ -34,18 +31,10 @@ export interface SyncConfig {
 
 export class SyncService {
   private blacklist: BlacklistService;
-  private companies: CompanyRepository;
-  private domains: DomainRepository;
-  private contacts: ContactRepository;
-  private emails: EmailRepository;
   private logger: Logger;
 
   constructor(private config: SyncConfig) {
     this.blacklist = new BlacklistService(config.db, config.kv);
-    this.companies = new CompanyRepository(config.db);
-    this.domains = new DomainRepository(config.db);
-    this.contacts = new ContactRepository(config.db);
-    this.emails = new EmailRepository(config.db);
     this.logger = createLogger();
   }
 
@@ -401,7 +390,8 @@ export class SyncService {
   }
 
   /**
-   * Process a single Gmail message
+   * Process a single Gmail message using batched DB operations
+   * This dramatically reduces query count from ~8 per email to ~6 total per message
    */
   private async processMessage(message: GmailMessage): Promise<{
     contactsCreated: number;
@@ -457,98 +447,288 @@ export class SyncService {
     const myEmailLower = this.config.myEmail.toLowerCase();
     const fromMe = allEmails.some((e) => e.role === 'from' && e.email === myEmailLower);
 
-    // Process each email address (excluding self)
+    // Filter out self and blacklisted emails
+    const validEmails: (ParsedEmail & { role: 'from' | 'to' | 'cc' })[] = [];
     for (const parsed of allEmails) {
       if (parsed.email === myEmailLower) {
         continue;
       }
-
-      // Check blacklist
       const isBlacklisted = await this.blacklist.isBlacklisted(parsed.email);
-      if (isBlacklisted) {
+      if (!isBlacklisted) {
+        validEmails.push(parsed);
+      }
+    }
+
+    if (validEmails.length === 0) {
+      return stats;
+    }
+
+    // Collect unique domains and emails
+    const uniqueDomains = [...new Set(validEmails.map((e) => e.domain))];
+    const uniqueEmailAddresses = [...new Set(validEmails.map((e) => e.email))];
+
+    // PHASE 1: Batch lookup existing domains and emails
+    const [existingDomainsResult, existingEmailsResult] = await Promise.all([
+      uniqueDomains.length > 0
+        ? this.config.db
+            .prepare(
+              `SELECT domain, company_id FROM domains WHERE domain IN (${uniqueDomains.map(() => '?').join(',')})`,
+            )
+            .bind(...uniqueDomains)
+            .all<{ domain: string; company_id: string }>()
+        : Promise.resolve({ results: [] as { domain: string; company_id: string }[] }),
+      uniqueEmailAddresses.length > 0
+        ? this.config.db
+            .prepare(
+              `SELECT e.email, e.contact_id, c.name as contact_name, c.company_id
+               FROM emails e JOIN contacts c ON e.contact_id = c.id
+               WHERE e.email IN (${uniqueEmailAddresses.map(() => '?').join(',')})`,
+            )
+            .bind(...uniqueEmailAddresses)
+            .all<{ email: string; contact_id: string; contact_name: string | null; company_id: string }>()
+        : Promise.resolve({ results: [] as { email: string; contact_id: string; contact_name: string | null; company_id: string }[] }),
+    ]);
+
+    // Build lookup maps
+    const domainToCompanyId = new Map<string, string>();
+    for (const row of existingDomainsResult.results) {
+      domainToCompanyId.set(row.domain, row.company_id);
+    }
+
+    const emailToContact = new Map<string, { contactId: string; contactName: string | null; companyId: string }>();
+    for (const row of existingEmailsResult.results) {
+      emailToContact.set(row.email, {
+        contactId: row.contact_id,
+        contactName: row.contact_name,
+        companyId: row.company_id,
+      });
+    }
+
+    // PHASE 2: Prepare inserts for new domains/companies
+    const timestamp = now();
+    const insertStatements: D1PreparedStatement[] = [];
+
+    // Track new companies and domains to insert
+    const newCompanies: { id: string; domain: string }[] = [];
+    for (const domain of uniqueDomains) {
+      if (!domainToCompanyId.has(domain)) {
+        const companyId = generateId();
+        newCompanies.push({ id: companyId, domain });
+        domainToCompanyId.set(domain, companyId);
+      }
+    }
+
+    // Batch insert new companies
+    if (newCompanies.length > 0) {
+      for (const company of newCompanies) {
+        insertStatements.push(
+          this.config.db
+            .prepare(
+              'INSERT INTO companies (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            )
+            .bind(company.id, company.domain, timestamp, timestamp),
+        );
+        insertStatements.push(
+          this.config.db
+            .prepare(
+              'INSERT INTO domains (domain, company_id, is_primary, created_at, updated_at) VALUES (?, ?, 1, ?, ?)',
+            )
+            .bind(company.domain, company.id, timestamp, timestamp),
+        );
+        stats.companiesCreated++;
+        stats.domainsCreated++;
+      }
+    }
+
+    // PHASE 3: Prepare inserts for new contacts/emails
+    const newContacts: { id: string; companyId: string; name: string | null; email: string }[] = [];
+    for (const emailAddr of uniqueEmailAddresses) {
+      if (!emailToContact.has(emailAddr)) {
+        const parsed = validEmails.find((e) => e.email === emailAddr);
+        if (parsed !== undefined) {
+          const companyId = domainToCompanyId.get(parsed.domain);
+          if (companyId !== undefined) {
+            const contactId = generateId();
+            newContacts.push({ id: contactId, companyId, name: parsed.name, email: emailAddr });
+            emailToContact.set(emailAddr, { contactId, contactName: parsed.name, companyId });
+          }
+        }
+      }
+    }
+
+    // Batch insert new contacts and emails
+    if (newContacts.length > 0) {
+      for (const contact of newContacts) {
+        insertStatements.push(
+          this.config.db
+            .prepare(
+              'INSERT INTO contacts (id, company_id, name, recent_threads, created_at, updated_at) VALUES (?, ?, ?, \'[]\', ?, ?)',
+            )
+            .bind(contact.id, contact.companyId, contact.name, timestamp, timestamp),
+        );
+        insertStatements.push(
+          this.config.db
+            .prepare(
+              'INSERT INTO emails (email, contact_id, domain, name_observed, recent_threads, created_at, updated_at) VALUES (?, ?, ?, ?, \'[]\', ?, ?)',
+            )
+            .bind(contact.email, contact.id, extractDomain(contact.email), contact.name, timestamp, timestamp),
+        );
+        stats.contactsCreated++;
+        stats.emailsCreated++;
+      }
+    }
+
+    // Execute all inserts in a single batch
+    if (insertStatements.length > 0) {
+      await this.config.db.batch(insertStatements);
+    }
+
+    // PHASE 4: Batch update stats
+    // Aggregate stats per entity
+    const companyStats = new Map<string, { emailsTo: number; emailsFrom: number; emailsIncluded: number }>();
+    const domainStats = new Map<string, { emailsTo: number; emailsFrom: number; emailsIncluded: number }>();
+    const contactStats = new Map<string, { emailsTo: number; emailsFrom: number; emailsIncluded: number }>();
+    const emailStats = new Map<string, { emailsTo: number; emailsFrom: number; emailsIncluded: number }>();
+    const contactNameUpdates: { contactId: string; name: string }[] = [];
+
+    for (const parsed of validEmails) {
+      const companyId = domainToCompanyId.get(parsed.domain);
+      const contactInfo = emailToContact.get(parsed.email);
+
+      if (companyId === undefined || contactInfo === undefined) {
         continue;
       }
 
-      // Determine stat type
       const isFrom = parsed.role === 'from';
       const isTo = parsed.role === 'to';
       const isIncluded = parsed.role === 'cc';
 
-      const statUpdate = {
+      const delta = {
         emailsTo: fromMe && isTo ? 1 : 0,
         emailsFrom: !fromMe && isFrom ? 1 : 0,
         emailsIncluded: isIncluded ? 1 : 0,
-        lastSeen: messageDate,
-        firstSeen: messageDate,
       };
 
-      // Find or create company and domain
-      const { company, isNew: companyIsNew } = await this.companies.findOrCreateByDomain(
-        parsed.domain,
-      );
-      if (companyIsNew) {
-        stats.companiesCreated++;
-      }
+      // Aggregate company stats
+      const cs = companyStats.get(companyId) ?? { emailsTo: 0, emailsFrom: 0, emailsIncluded: 0 };
+      cs.emailsTo += delta.emailsTo;
+      cs.emailsFrom += delta.emailsFrom;
+      cs.emailsIncluded += delta.emailsIncluded;
+      companyStats.set(companyId, cs);
 
-      const { domain, isNew: domainIsNew } = await this.domains.findOrCreate(
-        parsed.domain,
-        company.id,
-      );
-      if (domainIsNew) {
-        stats.domainsCreated++;
-      }
+      // Aggregate domain stats
+      const ds = domainStats.get(parsed.domain) ?? { emailsTo: 0, emailsFrom: 0, emailsIncluded: 0 };
+      ds.emailsTo += delta.emailsTo;
+      ds.emailsFrom += delta.emailsFrom;
+      ds.emailsIncluded += delta.emailsIncluded;
+      domainStats.set(parsed.domain, ds);
 
-      // Find or create contact - look for existing email first
-      let contact = await this.findContactByEmail(parsed.email);
-      let contactIsNew = false;
+      // Aggregate contact stats
+      const cts = contactStats.get(contactInfo.contactId) ?? { emailsTo: 0, emailsFrom: 0, emailsIncluded: 0 };
+      cts.emailsTo += delta.emailsTo;
+      cts.emailsFrom += delta.emailsFrom;
+      cts.emailsIncluded += delta.emailsIncluded;
+      contactStats.set(contactInfo.contactId, cts);
 
-      if (contact === null) {
-        contact = await this.contacts.create(company.id, parsed.name);
-        contactIsNew = true;
-        stats.contactsCreated++;
-      }
+      // Aggregate email stats
+      const es = emailStats.get(parsed.email) ?? { emailsTo: 0, emailsFrom: 0, emailsIncluded: 0 };
+      es.emailsTo += delta.emailsTo;
+      es.emailsFrom += delta.emailsFrom;
+      es.emailsIncluded += delta.emailsIncluded;
+      emailStats.set(parsed.email, es);
 
-      // Find or create email record
-      const { email: emailRecord, isNew: emailIsNew } = await this.emails.findOrCreate(
-        parsed.email,
-        contact.id,
-        parsed.domain,
-        parsed.name,
-      );
-      if (emailIsNew) {
-        stats.emailsCreated++;
-      }
-
-      // Update stats at all levels (thread tracking removed - will be done by separate job)
-      await Promise.all([
-        this.companies.updateStats(company.id, statUpdate),
-        this.domains.updateStats(domain.domain, statUpdate),
-        this.contacts.updateStats(contact.id, statUpdate),
-        this.emails.updateStats(emailRecord.email, statUpdate),
-      ]);
-
-      // Update contact name if we got a better one
-      if (!contactIsNew && parsed.name !== null && contact.name === null) {
-        await this.config.db
-          .prepare('UPDATE contacts SET name = ?, updated_at = ? WHERE id = ?')
-          .bind(parsed.name, now(), contact.id)
-          .run();
+      // Track contact name updates
+      if (parsed.name !== null && contactInfo.contactName === null) {
+        contactNameUpdates.push({ contactId: contactInfo.contactId, name: parsed.name });
       }
     }
 
+    // Build batch update statements
+    const updateStatements: D1PreparedStatement[] = [];
+
+    for (const [companyId, s] of companyStats) {
+      updateStatements.push(
+        this.config.db
+          .prepare(
+            `UPDATE companies SET
+              emails_to = emails_to + ?,
+              emails_from = emails_from + ?,
+              emails_included = emails_included + ?,
+              last_seen = MAX(COALESCE(last_seen, ?), ?),
+              first_seen = MIN(COALESCE(first_seen, ?), ?),
+              updated_at = ?
+            WHERE id = ?`,
+          )
+          .bind(s.emailsTo, s.emailsFrom, s.emailsIncluded, messageDate, messageDate, messageDate, messageDate, timestamp, companyId),
+      );
+    }
+
+    for (const [domain, s] of domainStats) {
+      updateStatements.push(
+        this.config.db
+          .prepare(
+            `UPDATE domains SET
+              emails_to = emails_to + ?,
+              emails_from = emails_from + ?,
+              emails_included = emails_included + ?,
+              last_seen = MAX(COALESCE(last_seen, ?), ?),
+              first_seen = MIN(COALESCE(first_seen, ?), ?),
+              updated_at = ?
+            WHERE domain = ?`,
+          )
+          .bind(s.emailsTo, s.emailsFrom, s.emailsIncluded, messageDate, messageDate, messageDate, messageDate, timestamp, domain),
+      );
+    }
+
+    for (const [contactId, s] of contactStats) {
+      updateStatements.push(
+        this.config.db
+          .prepare(
+            `UPDATE contacts SET
+              emails_to = emails_to + ?,
+              emails_from = emails_from + ?,
+              emails_included = emails_included + ?,
+              last_seen = MAX(COALESCE(last_seen, ?), ?),
+              first_seen = MIN(COALESCE(first_seen, ?), ?),
+              updated_at = ?
+            WHERE id = ?`,
+          )
+          .bind(s.emailsTo, s.emailsFrom, s.emailsIncluded, messageDate, messageDate, messageDate, messageDate, timestamp, contactId),
+      );
+    }
+
+    for (const [email, s] of emailStats) {
+      updateStatements.push(
+        this.config.db
+          .prepare(
+            `UPDATE emails SET
+              emails_to = emails_to + ?,
+              emails_from = emails_from + ?,
+              emails_included = emails_included + ?,
+              last_seen = MAX(COALESCE(last_seen, ?), ?),
+              first_seen = MIN(COALESCE(first_seen, ?), ?),
+              updated_at = ?
+            WHERE email = ?`,
+          )
+          .bind(s.emailsTo, s.emailsFrom, s.emailsIncluded, messageDate, messageDate, messageDate, messageDate, timestamp, email),
+      );
+    }
+
+    // Add contact name updates
+    for (const update of contactNameUpdates) {
+      updateStatements.push(
+        this.config.db
+          .prepare('UPDATE contacts SET name = ?, updated_at = ? WHERE id = ? AND name IS NULL')
+          .bind(update.name, timestamp, update.contactId),
+      );
+    }
+
+    // Execute all updates in a single batch
+    if (updateStatements.length > 0) {
+      await this.config.db.batch(updateStatements);
+    }
+
     return stats;
-  }
-
-  /**
-   * Find a contact by email address
-   */
-  private async findContactByEmail(email: string): Promise<{ id: string; name: string | null } | null> {
-    const result = await this.config.db
-      .prepare('SELECT c.id, c.name FROM contacts c JOIN emails e ON c.id = e.contact_id WHERE e.email = ?')
-      .bind(email.toLowerCase())
-      .first<{ id: string; name: string | null }>();
-
-    return result;
   }
 
   /**
