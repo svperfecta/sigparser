@@ -51,7 +51,7 @@ export interface ConversationContext {
   lastTalked: LastTalked | null;
   threads: ConversationThread[];
   searchedAccounts: AccountType[];
-  errors: { account: AccountType; error: string }[];
+  errors: { account?: AccountType; error: string }[];
 }
 
 /** Mailboxes the MCP surface may read, filtered to those with a refresh token. */
@@ -82,9 +82,27 @@ function gmailFor(env: Env, account: AccountType): GmailService | null {
   });
 }
 
-/** Gmail search query matching any message to/from/cc any of the addresses. */
-export function addressQuery(addresses: string[]): string {
-  const terms = addresses.flatMap((a) => [`from:${a}`, `to:${a}`, `cc:${a}`]);
+/**
+ * Plain email addresses only. Addresses go into a Gmail search query, so anything that could
+ * carry search operators (spaces, braces, parentheses, quotes, colons) is refused; otherwise a
+ * caller could widen the search to the whole mailbox.
+ */
+const SAFE_ADDRESS = /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+
+export function isSafeAddress(address: string): boolean {
+  return SAFE_ADDRESS.test(address);
+}
+
+/**
+ * Gmail search query matching any message to/from/cc any of the addresses, or null when no
+ * address is safe to search for.
+ */
+export function addressQuery(addresses: string[]): string | null {
+  const safe = addresses.map((a) => a.trim().toLowerCase()).filter(isSafeAddress);
+  if (safe.length === 0) {
+    return null;
+  }
+  const terms = safe.flatMap((a) => [`from:${a}`, `to:${a}`, `cc:${a}`]);
   return `{${terms.join(' ')}}`;
 }
 
@@ -227,6 +245,15 @@ export async function getConversationContext(
   addresses: string[],
   options: { threads: number; messagesPerThread: number },
 ): Promise<ConversationContext> {
+  const query = addressQuery(addresses);
+  if (query === null) {
+    return {
+      lastTalked: null,
+      threads: [],
+      searchedAccounts: [],
+      errors: [{ error: 'No valid email address to search for' }],
+    };
+  }
   const accounts = readableAccounts(env);
   const roles = parseRoles(env);
   const own = new Set(ownEmails(env, roles));
@@ -241,7 +268,7 @@ export async function getConversationContext(
         return;
       }
       try {
-        const list = await gmail.listMessages({ q: addressQuery(addresses), maxResults: 25 });
+        const list = await gmail.listMessages({ q: query, maxResults: 25 });
         const threadIds = [...new Set((list.messages ?? []).map((m) => m.threadId))].slice(
           0,
           options.threads,

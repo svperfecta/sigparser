@@ -39,9 +39,17 @@ describe('messageText', () => {
 
 describe('addressQuery', () => {
   it('matches from, to and cc for every address', () => {
-    expect(addressQuery(['a@x.com', 'b@y.com'])).toBe(
+    expect(addressQuery(['a@x.com', ' B@Y.com '])).toBe(
       '{from:a@x.com to:a@x.com cc:a@x.com from:b@y.com to:b@y.com cc:b@y.com}',
     );
+  });
+
+  it('refuses anything that could carry Gmail search operators', () => {
+    expect(addressQuery(['x} OR in:anywhere {'])).toBeNull();
+    expect(addressQuery(['a@x.com} in:sent {'])).toBeNull();
+    expect(addressQuery(['a@x.com OR b@y.com'])).toBeNull();
+    expect(addressQuery(['(a@x.com)'])).toBeNull();
+    expect(addressQuery(['bad', 'ok@x.com'])).toBe('{from:ok@x.com to:ok@x.com cc:ok@x.com}');
   });
 });
 
@@ -69,14 +77,25 @@ describe('readableAccounts', () => {
 
 describe('getConversationContext', () => {
   const b64 = (s: string): string => Buffer.from(s).toString('base64url');
-  const msg = (from: string, to: string, date: string, text: string, extra: { name: string; value: string }[] = []) => ({
+  const msg = (
+    from: string,
+    to: string,
+    date: string,
+    text: string,
+    extra: { name: string; value: string }[] = [],
+  ) => ({
     id: date,
     threadId: 't1',
     internalDate: String(Date.parse(date)),
     snippet: text,
     payload: {
       mimeType: 'text/plain',
-      headers: [{ name: 'From', value: from }, { name: 'To', value: to }, { name: 'Subject', value: 'Q3 launch' }, ...extra],
+      headers: [
+        { name: 'From', value: from },
+        { name: 'To', value: to },
+        { name: 'Subject', value: 'Q3 launch' },
+        ...extra,
+      ],
       body: { data: b64(text), size: text.length },
     },
   });
@@ -85,10 +104,19 @@ describe('getConversationContext', () => {
     const thread = {
       id: 't1',
       messages: [
-        msg('Brian <brian@madglory.com>', 'Pat <pat@acme.com>', '2017-03-01T10:00:00Z', 'Kickoff notes', [
-          { name: 'Delivered-To', value: 'brian@madglory.com' },
-        ]),
-        msg('Pat <pat@acme.com>', 'brian@madglory.com', '2017-03-02T10:00:00Z', 'Sounds good, ship it'),
+        msg(
+          'Brian <brian@madglory.com>',
+          'Pat <pat@acme.com>',
+          '2017-03-01T10:00:00Z',
+          'Kickoff notes',
+          [{ name: 'Delivered-To', value: 'brian@madglory.com' }],
+        ),
+        msg(
+          'Pat <pat@acme.com>',
+          'brian@madglory.com',
+          '2017-03-02T10:00:00Z',
+          'Sounds good, ship it',
+        ),
       ],
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -108,10 +136,15 @@ describe('getConversationContext', () => {
       GOOGLE_CLIENT_ID: 'id',
       GOOGLE_CLIENT_SECRET: 'secret',
       GMAIL_REFRESH_TOKEN_WORK: 'w',
-      MY_ROLES: JSON.stringify([{ company: 'MadGlory', emails: ['brian@madglory.com'], from: '2014', to: '2017' }]),
+      MY_ROLES: JSON.stringify([
+        { company: 'MadGlory', emails: ['brian@madglory.com'], from: '2014', to: '2017' },
+      ]),
     } as Env;
 
-    const context = await getConversationContext(env, ['pat@acme.com'], { threads: 1, messagesPerThread: 5 });
+    const context = await getConversationContext(env, ['pat@acme.com'], {
+      threads: 1,
+      messagesPerThread: 5,
+    });
     vi.unstubAllGlobals();
 
     expect(context.lastTalked).toEqual({
@@ -120,8 +153,14 @@ describe('getConversationContext', () => {
       yourCompanyThen: 'MadGlory',
       lastWriter: 'them',
     });
-    expect(context.threads[0]!.you).toEqual({ addresses: ['brian@madglory.com'], company: 'MadGlory' });
-    expect(context.threads[0]!.messages.map((m) => m.text)).toEqual(['Kickoff notes', 'Sounds good, ship it']);
+    expect(context.threads[0]!.you).toEqual({
+      addresses: ['brian@madglory.com'],
+      company: 'MadGlory',
+    });
+    expect(context.threads[0]!.messages.map((m) => m.text)).toEqual([
+      'Kickoff notes',
+      'Sounds good, ship it',
+    ]);
     // Only the work mailbox is read by default.
     expect(context.searchedAccounts).toEqual(['work']);
   });

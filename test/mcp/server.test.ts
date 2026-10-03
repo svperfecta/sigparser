@@ -36,7 +36,11 @@ function seed(sqlite: ReturnType<typeof createTestD1>['sqlite']): void {
   contact('c5', 'Me Old', 50, 50, iso(800), 'me@old.com', 'other.com');
 }
 
-async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function post(
+  name: string,
+  args: Record<string, unknown>,
+  props: unknown,
+): Promise<Response> {
   const request = new Request('https://sigparser.example.com/mcp', {
     method: 'POST',
     headers: {
@@ -61,7 +65,11 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       },
     }),
   });
-  const response = await handleMcpRequest(request, env, {} as ExecutionContext);
+  return handleMcpRequest(request, env, { props } as unknown as ExecutionContext);
+}
+
+async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const response = await post(name, args, { email: 'Owner@Example.com', name: 'Owner', sub: 's' });
   const raw = await response.text();
   const json = raw.startsWith('{')
     ? raw
@@ -77,7 +85,12 @@ describe('MCP server', () => {
   beforeEach(() => {
     const { d1, sqlite } = createTestD1();
     seed(sqlite);
-    env = { DB: d1, MY_EMAIL_WORK: 'me@work.com', MY_OTHER_EMAILS: 'ME@old.com' } as Env;
+    env = {
+      DB: d1,
+      MY_EMAIL_WORK: 'me@work.com',
+      MY_OTHER_EMAILS: 'ME@old.com',
+      MCP_ALLOWED_EMAILS: 'owner@example.com',
+    } as Env;
   });
 
   it('search_contacts filters by domain including subdomains', async () => {
@@ -114,6 +127,24 @@ describe('MCP server', () => {
       contacts: unknown[];
     };
     expect(recentOnly.contacts).toEqual([]);
+  });
+
+  it('refuses grants whose email is not (or no longer) allowlisted', async () => {
+    expect((await post('sync_status', {}, { email: 'intruder@example.com' })).status).toBe(403);
+    expect((await post('sync_status', {}, undefined)).status).toBe(403);
+    env = { ...env, MCP_ALLOWED_EMAILS: '' } as Env;
+    expect((await post('sync_status', {}, { email: 'owner@example.com' })).status).toBe(403);
+  });
+
+  it('get_conversation_context refuses a search-operator email', async () => {
+    const result = (await callTool('get_conversation_context', {
+      email: 'x} OR in:anywhere {',
+    })) as {
+      threads: unknown[];
+      errors: { error: string }[];
+    };
+    expect(result.threads).toEqual([]);
+    expect(result.errors[0]!.error).toMatch(/No valid email/);
   });
 
   it('get_conversation_context reads no mailbox when none is configured', async () => {
