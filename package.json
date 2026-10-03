@@ -12,25 +12,23 @@
     "db:seed": "wrangler d1 execute sigparser-db --local --file=scripts/seed-blacklist.sql",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src --ext .ts",
-    "lint:fix": "eslint src --ext .ts --fix",
+    "lint": "oxlint . --type-aware --max-warnings=0",
+    "lint:fix": "oxlint . --type-aware --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.13.12"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241106.0",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.4.0",
-    "typescript": "^5.6.0",
-    "vitest": "^4.0.18",
-    "wrangler": "^4.60.0"
+    "@cloudflare/workers-types": "^5.20261003.1",
+    "oxlint": "^1.86.0",
+    "oxlint-tsgolint": "^7.0.2003",
+    "prettier": "^3.9.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.147.0"
   },
   "engines": {
     "node": ">=24.0.0"

@@ -375,10 +375,17 @@ export class SyncService {
         pageToken = historyResponse.nextPageToken;
       } while (pageToken !== undefined);
     } catch (error) {
-      // History ID might be expired, fall back to full sync
-      if (error instanceof Error && error.message.includes('404')) {
-        this.logger.warn('History expired, running full sync');
-        return this.fullSync();
+      // History ID expired (Gmail keeps roughly a week). A full sync cannot finish inside
+      // one Worker invocation, so rewind the day-by-day batch cursor to the last good sync
+      // and let the cron catch up. Already-processed messages are skipped.
+      if (error instanceof Error && error.message.includes('Gmail API error: 404')) {
+        const resumeDate = (syncState.last_sync ?? now()).slice(0, 10);
+        this.logger.warn('History expired, rewinding batch sync', {
+          account: this.config.account,
+          resumeDate,
+        });
+        await this.updateSyncStateWithDate(syncState.last_history_id, resumeDate, null, 0);
+        return result;
       }
       throw error;
     }

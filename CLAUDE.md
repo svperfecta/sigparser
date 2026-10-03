@@ -87,8 +87,8 @@ npm run db:seed           # Seed blacklist data
 npm run test              # Run tests
 
 # Code Quality
-npm run lint              # ESLint check
-npm run lint:fix          # ESLint with auto-fix
+npm run lint              # oxlint check (type-aware)
+npm run lint:fix          # oxlint with auto-fix
 npm run format            # Prettier format
 npm run typecheck         # TypeScript check
 
@@ -158,11 +158,11 @@ npm run db:migrate:remote
 - `noUnusedParameters: true`
 - `exactOptionalPropertyTypes: true`
 
-### ESLint Rules (ENFORCED)
-- `@typescript-eslint/explicit-function-return-type: error` - All functions need return types
-- `@typescript-eslint/no-explicit-any: error` - No `any` types allowed
-- `@typescript-eslint/strict-boolean-expressions: error` - No truthy/falsy checks
-- `@typescript-eslint/no-floating-promises: error` - Must await or void promises
+### Lint Rules (oxlint `--type-aware`, `.oxlintrc.json`, ENFORCED)
+- `typescript/explicit-function-return-type: error` - All functions need return types
+- `typescript/no-explicit-any: error` - No `any` types allowed
+- `typescript/strict-boolean-expressions: error` - No truthy/falsy checks
+- `typescript/no-floating-promises: error` - Must await or void promises
 - `no-console: error` (except warn/error) - Use logger utility instead
 
 ### Naming Conventions
@@ -208,7 +208,7 @@ Test core business logic only. No coverage thresholds enforced.
 
 ### CI Workflow (`.github/workflows/ci.yml`)
 Runs on all PRs and pushes to main:
-1. **lint** - ESLint check
+1. **lint** - oxlint check (type-aware)
 2. **typecheck** - TypeScript compilation check
 3. **test** - Run tests
 

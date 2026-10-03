@@ -116,14 +116,13 @@ export class GmailService {
   ): Promise<T> {
     const token = await this.getAccessToken();
 
-    const response = await fetch(`${GMAIL_API_BASE}${endpoint}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    const headers = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    const response = await fetch(`${GMAIL_API_BASE}${endpoint}`, { ...options, headers });
 
     // Handle rate limiting and transient errors with exponential backoff
     if (response.status === 429 || response.status === 500 || response.status === 503) {

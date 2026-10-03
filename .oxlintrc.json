@@ -1,0 +1,17 @@
+{
+  "ignorePatterns": ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "**/coverage/**", "test/**"],
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/explicit-function-return-type": "error",
+    "typescript/strict-boolean-expressions": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/prefer-nullish-coalescing": "error",
+    "typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "no-console": ["error", { "allow": ["warn", "error"] }],
+    "eqeqeq": ["error", "always"],
+    "curly": ["error", "all"]
+  }
+}
