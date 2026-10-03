@@ -8,7 +8,7 @@ sigparser is a self-hosted contact intelligence system that mines email history 
 
 ## Tech Stack
 
-- **Runtime**: Node.js 20.x, npm
+- **Runtime**: Node.js 24.x, npm
 - **Backend**: Cloudflare Workers with Hono framework, D1 (SQLite), KV
 - **Frontend**: HTMX for dynamic interactions, server-rendered HTML, Tailwind CSS (pre-built)
 - **Auth**: Cloudflare Access (handles Google OAuth, session management)

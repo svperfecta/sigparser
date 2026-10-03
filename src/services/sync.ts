@@ -337,33 +337,38 @@ export class SyncService {
 
         latestHistoryId = historyResponse.historyId;
 
-        if (historyResponse.history !== undefined) {
-          for (const record of historyResponse.history) {
-            if (record.messagesAdded !== undefined) {
-              for (const added of record.messagesAdded) {
-                try {
-                  // Check if already processed
-                  const isProcessed = await this.isMessageProcessed(added.message.id);
-                  if (isProcessed) {
-                    continue;
-                  }
+        // History records only carry message stubs (id, threadId, labelIds) - no headers.
+        // Collect the new IDs, then fetch full metadata before processing.
+        const newMessageIds = new Set<string>();
+        for (const record of historyResponse.history ?? []) {
+          for (const added of record.messagesAdded ?? []) {
+            newMessageIds.add(added.message.id);
+          }
+        }
 
-                  const processed = await this.processMessage(added.message);
-                  result.messagesProcessed++;
-                  result.contactsCreated += processed.contactsCreated;
-                  result.companiesCreated += processed.companiesCreated;
-                  result.domainsCreated += processed.domainsCreated;
-                  result.emailsCreated += processed.emailsCreated;
+        const unprocessedIds: string[] = [];
+        for (const id of newMessageIds) {
+          if (!(await this.isMessageProcessed(id))) {
+            unprocessedIds.push(id);
+          }
+        }
 
-                  await this.markMessageProcessed(added.message.id);
-                } catch (error) {
-                  result.errors.push({
-                    messageId: added.message.id,
-                    error: error instanceof Error ? error.message : String(error),
-                  });
-                }
-              }
-            }
+        const messages = await this.config.gmail.batchGetMessages(unprocessedIds);
+        for (const message of messages) {
+          try {
+            const processed = await this.processMessage(message);
+            result.messagesProcessed++;
+            result.contactsCreated += processed.contactsCreated;
+            result.companiesCreated += processed.companiesCreated;
+            result.domainsCreated += processed.domainsCreated;
+            result.emailsCreated += processed.emailsCreated;
+
+            await this.markMessageProcessed(message.id);
+          } catch (error) {
+            result.errors.push({
+              messageId: message.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
 
