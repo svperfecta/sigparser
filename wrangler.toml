@@ -1,5 +1,8 @@
 name = "sigparser"
 main = "src/index.ts"
+# Brian's Cloudflare account that owns sigparser (workers.dev subdomain: rocketsciencegg).
+# Pinned so wrangler never prompts or picks another logged-in account.
+account_id = "89a1b9fbcf7d0971fcfa1404054964a3"
 compatibility_date = "2026-09-15"
 compatibility_flags = ["nodejs_compat"]
 
@@ -28,12 +31,3 @@ crons = ["*/15 * * * *"]  # Every 15 minutes
 
 [site]
 bucket = "./static"
-
-# Development overrides
-[env.dev]
-vars = { ENVIRONMENT = "development" }
-
-[env.dev.d1_databases]
-binding = "DB"
-database_name = "sigparser-db"
-database_id = "local"

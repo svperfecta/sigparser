@@ -19,7 +19,6 @@ import { dirname, join } from 'node:path';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const CLOUDFLARE_ACCOUNT_ID = '89a1b9fbcf7d0971fcfa1404054964a3';
 const TIMEOUT_MS = 5 * 60 * 1000;
 
 function fail(msg) {
@@ -208,7 +207,7 @@ try {
   console.log(`  ${data.refresh_token}\n`);
   console.log('Store it in the Worker (paste the token when prompted):\n');
   console.log(
-    `  CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID} npx wrangler secret put ${secretName}\n`,
+    `  npx wrangler secret put ${secretName}\n`,
   );
   console.log(
     'Reminder: if the consent screen is still in "Testing", this token will expire in 7 days.',

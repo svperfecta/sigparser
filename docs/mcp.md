@@ -31,7 +31,7 @@ user approves the client on a consent page. Until the Access secrets and allowli
    - Scopes: `openid`, `email`, `profile`. Turn PKCE on.
    - Login method: One-time PIN (or Google). Policy: Allow, emails = your address.
    - Note the **Client ID**, **Client secret**, and the team domain (`<team>.cloudflareaccess.com`).
-2. Secrets (`export CLOUDFLARE_ACCOUNT_ID=89a1b9fbcf7d0971fcfa1404054964a3` first):
+2. Secrets (wrangler.toml pins the account):
    ```bash
    npx wrangler secret put ACCESS_TEAM_DOMAIN         # <team> or <team>.cloudflareaccess.com
    npx wrangler secret put ACCESS_OIDC_CLIENT_ID

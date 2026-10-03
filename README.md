@@ -122,7 +122,7 @@ If sync starts failing with `invalid_grant` (token revoked or expired):
 3. Run `just gmail-token --login-hint you@company.com` and sign in with that account.
 4. Run the printed command and paste the token:
    ```bash
-   CLOUDFLARE_ACCOUNT_ID=89a1b9fbcf7d0971fcfa1404054964a3 npx wrangler secret put GMAIL_REFRESH_TOKEN_WORK
+   npx wrangler secret put GMAIL_REFRESH_TOKEN_WORK
    ```
 5. If the script says no refresh token was returned, revoke sigparser at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) and run it again.
 

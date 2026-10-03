@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run",
-    "deploy": "wrangler deploy --env=\"\"",
+    "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply sigparser-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply sigparser-db --remote",
     "db:seed": "wrangler d1 execute sigparser-db --local --file=scripts/seed-blacklist.sql",
