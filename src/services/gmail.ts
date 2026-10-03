@@ -18,6 +18,26 @@ export interface GmailMessage {
   internalDate: string;
 }
 
+export interface GmailMessagePart {
+  mimeType: string;
+  headers?: { name: string; value: string }[];
+  body?: { data?: string; size: number };
+  parts?: GmailMessagePart[];
+}
+
+export interface GmailFullMessage {
+  id: string;
+  threadId: string;
+  internalDate: string;
+  snippet: string;
+  payload: GmailMessagePart;
+}
+
+export interface GmailThread {
+  id: string;
+  messages?: GmailFullMessage[];
+}
+
 export interface GmailMessageRef {
   id: string;
   threadId: string;
@@ -239,6 +259,13 @@ export class GmailService {
 
     const endpoint = `/history?${searchParams.toString()}`;
     return this.request<GmailHistoryResponse>(endpoint);
+  }
+
+  /**
+   * Get a full thread (all messages with bodies) by ID
+   */
+  async getThread(threadId: string): Promise<GmailThread> {
+    return this.request<GmailThread>(`/threads/${threadId}?format=full`);
   }
 
   /**

@@ -87,34 +87,44 @@ npm run deploy
    - Your personal Gmail (e.g., `you@gmail.com`)
 6. Save
 
-> **Note**: The app stays in "Testing" mode, so only the emails you explicitly add can authorize. This is fine for personal use.
+7. Under **Audience** (Publishing status), click **Publish app** so the status is **In production**.
+
+> **Important**: Do not leave the app in "Testing". Google expires refresh tokens issued by Testing-mode apps after **7 days**, which silently kills sync. In production, an unverified app just shows an "unverified app" warning during consent, which is fine for personal use.
 
 ### 3. Create OAuth Credentials
 
 1. Go to **APIs & Services → Credentials**
 2. Click **Create Credentials → OAuth client ID**
-3. Application type: **Web application**
+3. Application type: **Desktop app** (loopback redirects to `http://127.0.0.1:<any port>` work automatically)
+   - If you already have a **Web application** client, keep it and instead add the authorized redirect URI `http://127.0.0.1:8765`, then pass `--port 8765` to the token script below.
 4. Name: `sigparser`
-5. Authorized redirect URIs:
-   - `https://developers.google.com/oauthplayground` (for getting refresh token)
-6. Click **Create**
+5. Click **Create**
 7. Copy the **Client ID** and **Client Secret**
 
 ### 4. Get Gmail Refresh Tokens
 
-> **Repeat this process for each Gmail account** you want to sync (work and personal).
+Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.dev.vars` (or export them), then run once per account:
 
-1. Go to [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/)
-2. Click the **gear icon** (top right) → Check "Use your own OAuth credentials"
-3. Enter your **Client ID** and **Client Secret**
-4. In the left panel, find **Gmail API v1** and select:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-5. Click **Authorize APIs**
-6. Sign in with the Gmail account you want to sync
-7. Click **Exchange authorization code for tokens**
-8. Copy the **Refresh token** → save as `GMAIL_REFRESH_TOKEN_WORK` or `GMAIL_REFRESH_TOKEN_PERSONAL`
+```bash
+just gmail-token --login-hint you@company.com                     # work
+just gmail-token --account personal --login-hint you@gmail.com    # personal
+# (equivalent: node scripts/gmail-token.mjs ...; add --port 8765 for a Web application client)
+```
 
-**For your second account**: Sign out of Google, return to step 1, and sign in with your other account.
+The script opens the Google consent page in your browser, catches the redirect on a local loopback server (PKCE + state check), prints the refresh token, and prints the `wrangler secret put` command to store it. It writes nothing to disk.
+
+#### Re-minting a Gmail refresh token
+
+If sync starts failing with `invalid_grant` (token revoked or expired):
+
+1. In Google Cloud Console, check the prerequisites: **Gmail API** enabled, OAuth consent screen publishing status **In production** (Testing-mode tokens die after 7 days), and an OAuth client of type **Desktop app** (or a Web client with `http://127.0.0.1:8765` registered as a redirect URI, used with `--port 8765`).
+2. Use the **same** client ID/secret the Worker uses. Refresh tokens are bound to the client that minted them; if you create a new client, update `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` too and re-mint tokens for every account.
+3. Run `just gmail-token --login-hint you@company.com` and sign in with that account.
+4. Run the printed command and paste the token:
+   ```bash
+   CLOUDFLARE_ACCOUNT_ID=89a1b9fbcf7d0971fcfa1404054964a3 npx wrangler secret put GMAIL_REFRESH_TOKEN_WORK
+   ```
+5. If the script says no refresh token was returned, revoke sigparser at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) and run it again.
 
 ### 5. Set Cloudflare Secrets
 
@@ -243,3 +253,7 @@ just logs             # Tail production logs
 ## License
 
 MIT
+
+## MCP server
+
+sigparser exposes a read-only MCP server at `/mcp` for Claude and bots (search by domain, find dormant relationships, last-conversation context). Setup and tools: [docs/mcp.md](docs/mcp.md).

@@ -1,8 +1,9 @@
 name: Deploy
 
+# Manual only: deploys are run by hand (`just deploy`). This needs the CLOUDFLARE_API_TOKEN
+# repository secret, which is not set.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:

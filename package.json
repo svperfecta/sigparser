@@ -12,14 +12,19 @@
     "db:seed": "wrangler d1 execute sigparser-db --local --file=scripts/seed-blacklist.sql",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "oxlint . --type-aware --max-warnings=0",
-    "lint:fix": "oxlint . --type-aware --fix",
+    "lint": "oxlint src --type-aware --max-warnings=0",
+    "lint:fix": "oxlint src --type-aware --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.13.12"
+    "@cloudflare/workers-oauth-provider": "^1.2.1",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "agents": "^0.26.0",
+    "hono": "^4.13.12",
+    "jose": "^6.2.12",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261003.1",

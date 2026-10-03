@@ -1,3 +1,4 @@
+import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { Hono } from 'hono';
 // @ts-expect-error - Workers Sites manifest is auto-generated
 import manifest from '__STATIC_CONTENT_MANIFEST';
@@ -9,6 +10,9 @@ import { basicAuth } from './middleware/auth.js';
 import { createLogger } from './utils/logger.js';
 import { GmailService } from './services/gmail.js';
 import { SyncService, getSyncStatus } from './services/sync.js';
+import { isMcpAuthConfigured } from './auth/oidc.js';
+import { OAUTH_ROUTE_PATHS, oauthRoutes } from './auth/oauthRoutes.js';
+import { handleMcpRequest } from './mcp/handler.js';
 
 // Import API routes
 import companiesRoutes from './routes/api/companies.js';
@@ -277,7 +281,50 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
   ctx.waitUntil(runSync());
 };
 
+// === MCP surface ===
+// OAuthProvider owns /mcp (bearer-token gated), /token, /register and the OAuth metadata
+// endpoints. /authorize and /callback run the Cloudflare Access sign-in outside the
+// main app's Basic auth; everything else falls through to the Hono app unchanged.
+let oauthProvider: OAuthProvider<Env> | undefined;
+
+function getOAuthProvider(publicUrl: string): OAuthProvider<Env> {
+  oauthProvider ??= new OAuthProvider<Env>({
+    apiRoute: ['/mcp'],
+    apiHandler: { fetch: handleMcpRequest },
+    defaultHandler: {
+      fetch: (request, env, ctx): Response | Promise<Response> =>
+        OAUTH_ROUTE_PATHS.includes(new URL(request.url).pathname)
+          ? oauthRoutes.fetch(request, env, ctx)
+          : app.fetch(request, env, ctx),
+    },
+    authorizeEndpoint: '/authorize',
+    tokenEndpoint: '/token',
+    clientRegistrationEndpoint: '/register',
+    scopesSupported: ['openid', 'profile', 'email'],
+    accessTokenTTL: 3600,
+    refreshTokenTTL: 30 * 24 * 3600,
+    resourceMetadata: {
+      resource: `${publicUrl}/mcp`,
+      authorization_servers: [publicUrl],
+      resource_name: 'sigparser',
+    },
+  });
+  return oauthProvider;
+}
+
+const fetch: ExportedHandlerFetchHandler<Env> = (request, env, ctx) => {
+  // Until the Access OIDC app and allowlist are configured, MCP is off: /mcp gets a clear 503
+  // and every other request goes straight to the app as before.
+  if (isMcpAuthConfigured(env) && env.PUBLIC_URL !== undefined && env.PUBLIC_URL !== '') {
+    return getOAuthProvider(env.PUBLIC_URL).fetch(request, env, ctx);
+  }
+  if (new URL(request.url).pathname.startsWith('/mcp')) {
+    return Response.json({ error: 'MCP is unavailable: OAuth is not configured' }, { status: 503 });
+  }
+  return app.fetch(request, env, ctx);
+};
+
 export default {
-  fetch: app.fetch,
+  fetch,
   scheduled,
 };

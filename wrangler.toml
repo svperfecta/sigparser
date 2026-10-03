@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
+PUBLIC_URL = "https://sigparser.rocketsciencegg.workers.dev"
 
 [[d1_databases]]
 binding = "DB"
@@ -14,6 +15,12 @@ migrations_dir = "src/db/migrations"
 
 [[kv_namespaces]]
 binding = "KV"
+id = "9ee38f66272841f684bf6973f2680bd3"
+
+# OAuth grants/tokens for the MCP surface. Shares the KV namespace; keys are prefixed
+# (oauth-state:, oauth-consent:, and workers-oauth-provider's own grant:/token:/client:).
+[[kv_namespaces]]
+binding = "OAUTH_KV"
 id = "9ee38f66272841f684bf6973f2680bd3"
 
 [triggers]

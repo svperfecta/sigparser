@@ -21,3 +21,7 @@ migrate-remote:
 
 logs:
     wrangler tail
+
+# Mint a Gmail refresh token (e.g. `just gmail-token --login-hint you@company.com`)
+gmail-token *args:
+    node scripts/gmail-token.mjs {{args}}

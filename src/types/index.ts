@@ -11,7 +11,20 @@ export interface Env {
   GMAIL_REFRESH_TOKEN_PERSONAL?: string;
   MY_EMAIL_WORK: string;
   MY_EMAIL_PERSONAL?: string;
+  // Old addresses of the user, comma-separated, excluded from MCP contact results.
+  MY_OTHER_EMAILS?: string;
+  // JSON employment timeline (see services/roles.ts); adds "your company then" to MCP results.
+  MY_ROLES?: string;
   ENVIRONMENT: string;
+  // MCP OAuth (Cloudflare Access for SaaS). /mcp returns 503 until all are set.
+  OAUTH_KV: KVNamespace;
+  PUBLIC_URL?: string;
+  // Mailboxes get_conversation_context may read, comma-separated (default: work).
+  MCP_GMAIL_ACCOUNTS?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_OIDC_CLIENT_ID?: string;
+  ACCESS_OIDC_CLIENT_SECRET?: string;
+  MCP_ALLOWED_EMAILS?: string;
 }
 
 // === Base Types ===
