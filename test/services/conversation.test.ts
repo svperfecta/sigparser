@@ -17,6 +17,26 @@ describe('messageText', () => {
     expect(messageText(msg)).toBe('Sounds great, let us talk Tuesday.');
   });
 
+  it('handles a wrapped attribution line and drops the signature', () => {
+    const body =
+      'Hey Karen - I owe you documents!\n\nThey are attached.\n\n' +
+      'On Mon, Nov 11, 2024 at 3:21 PM Karen Simons <karen@x.com>\nwrote:\n\n' +
+      '-- \n\nBrian Corrigan\nPhone: +1 555';
+    const msg = message({ mimeType: 'text/plain', body: { data: b64(body), size: body.length } });
+    expect(messageText(msg)).toBe('Hey Karen - I owe you documents!\n\nThey are attached.');
+
+    const sigOnly = 'Thanks!\n-- \nBrian';
+    expect(
+      messageText(message({ mimeType: 'text/plain', body: { data: b64(sigOnly), size: 1 } })),
+    ).toBe('Thanks!');
+
+    // A sentence starting with "On" is kept when no "wrote:" follows.
+    const onSentence = 'On Tuesday we ship.\nSee you then.';
+    expect(
+      messageText(message({ mimeType: 'text/plain', body: { data: b64(onSentence), size: 1 } })),
+    ).toBe('On Tuesday we ship.\nSee you then.');
+  });
+
   it('prefers text/plain inside multipart, falls back to html, then snippet', () => {
     const multipart = message({
       mimeType: 'multipart/alternative',

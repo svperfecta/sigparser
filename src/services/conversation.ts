@@ -158,12 +158,20 @@ export function messageText(message: GmailFullMessage): string {
     text = message.snippet;
   }
 
+  // Cut at the start of quoted history or the signature, whichever comes first. Gmail wraps the
+  // "On <date> <name> <addr>" line, so "wrote:" can land up to two lines later.
+  const all = text.split(/\r?\n/);
   const lines: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (let i = 0; i < all.length; i++) {
+    const line = all[i] ?? '';
+    const attribution =
+      /^On .+/.test(line) &&
+      [line, all[i + 1] ?? '', all[i + 2] ?? ''].some((l) => /wrote:\s*$/.test(l));
     if (
-      /^On .+wrote:\s*$/.test(line) ||
+      attribution ||
       /^-{2,}\s*Original Message/i.test(line) ||
-      /^From: .+/.test(line)
+      /^From: .+/.test(line) ||
+      /^-- ?$/.test(line)
     ) {
       break;
     }
