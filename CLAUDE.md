@@ -255,7 +255,7 @@ wrangler kv:namespace create KV
 
 ## MCP Server
 
-`/mcp` is a stateless MCP server (`agents/mcp/server` `createMcpHandler`, `@modelcontextprotocol/server` v2) behind `@cloudflare/workers-oauth-provider`, with sign-in through a Cloudflare Access for SaaS OIDC app (`src/auth/`). Tools live in `src/mcp/server.ts`; all are read-only. See `docs/mcp.md`.
+`/mcp` is a stateless MCP server (`agents/mcp/server` `createMcpHandler`, `@modelcontextprotocol/server` v2) behind `@cloudflare/workers-oauth-provider`, with sign-in by the web UI's AUTH_USERNAME / AUTH_PASSWORD on a combined login + consent form (`src/auth/`). Tools live in `src/mcp/server.ts`; all are read-only. See `docs/mcp.md`.
 
 ## API Endpoints Reference
 

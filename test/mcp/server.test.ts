@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { handleMcpRequest } from '../../src/mcp/handler.js';
 import type { Env } from '../../src/types/index.js';
 import { createTestD1 } from '../helpers/d1.js';
+import { credentialFingerprint } from '../../src/auth/password.js';
 
 const NOW = Date.now();
 const iso = (daysAgo: number): string => new Date(NOW - daysAgo * 86_400_000).toISOString();
@@ -69,7 +70,8 @@ async function post(
 }
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const response = await post(name, args, { email: 'Owner@Example.com', name: 'Owner', sub: 's' });
+  const fingerprint = await credentialFingerprint(env);
+  const response = await post(name, args, { username: 'owner', fingerprint });
   const raw = await response.text();
   const json = raw.startsWith('{')
     ? raw
@@ -89,7 +91,8 @@ describe('MCP server', () => {
       DB: d1,
       MY_EMAIL_WORK: 'me@work.com',
       MY_OTHER_EMAILS: 'ME@old.com',
-      MCP_ALLOWED_EMAILS: 'owner@example.com',
+      AUTH_USERNAME: 'owner',
+      AUTH_PASSWORD: 'correct horse',
     } as Env;
   });
 
@@ -129,11 +132,27 @@ describe('MCP server', () => {
     expect(recentOnly.contacts).toEqual([]);
   });
 
-  it('refuses grants whose email is not (or no longer) allowlisted', async () => {
-    expect((await post('sync_status', {}, { email: 'intruder@example.com' })).status).toBe(403);
+  it('refuses grants without the current credential fingerprint', async () => {
+    const good = await credentialFingerprint(env);
+    expect((await post('sync_status', {}, { username: 'owner', fingerprint: good })).status).toBe(
+      200,
+    );
+    expect(
+      (await post('sync_status', {}, { username: 'owner', fingerprint: 'stale' })).status,
+    ).toBe(403);
     expect((await post('sync_status', {}, undefined)).status).toBe(403);
-    env = { ...env, MCP_ALLOWED_EMAILS: '' } as Env;
-    expect((await post('sync_status', {}, { email: 'owner@example.com' })).status).toBe(403);
+
+    // Changing the password signs out grants approved with the old one.
+    env = { ...env, AUTH_PASSWORD: 'new password' } as Env;
+    expect((await post('sync_status', {}, { username: 'owner', fingerprint: good })).status).toBe(
+      403,
+    );
+
+    // No credentials configured: nothing gets in.
+    env = { ...env, AUTH_PASSWORD: '' } as Env;
+    expect((await post('sync_status', {}, { username: 'owner', fingerprint: good })).status).toBe(
+      403,
+    );
   });
 
   it('get_conversation_context refuses a search-operator email', async () => {

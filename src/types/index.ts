@@ -16,15 +16,14 @@ export interface Env {
   // JSON employment timeline (see services/roles.ts); adds "your company then" to MCP results.
   MY_ROLES?: string;
   ENVIRONMENT: string;
-  // MCP OAuth (Cloudflare Access for SaaS). /mcp returns 503 until all are set.
+  // Web UI Basic auth; also the MCP sign-in. /mcp returns 503 until both are set.
+  AUTH_USERNAME?: string;
+  AUTH_PASSWORD?: string;
+  // OAuth grants and tokens for the MCP surface.
   OAUTH_KV: KVNamespace;
   PUBLIC_URL?: string;
   // Mailboxes get_conversation_context may read, comma-separated (default: work).
   MCP_GMAIL_ACCOUNTS?: string;
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_OIDC_CLIENT_ID?: string;
-  ACCESS_OIDC_CLIENT_SECRET?: string;
-  MCP_ALLOWED_EMAILS?: string;
 }
 
 // === Base Types ===

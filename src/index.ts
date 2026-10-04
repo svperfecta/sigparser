@@ -10,7 +10,7 @@ import { basicAuth } from './middleware/auth.js';
 import { createLogger } from './utils/logger.js';
 import { GmailService } from './services/gmail.js';
 import { SyncService, getSyncStatus } from './services/sync.js';
-import { isMcpAuthConfigured } from './auth/oidc.js';
+import { isMcpAuthConfigured } from './auth/password.js';
 import { OAUTH_ROUTE_PATHS, oauthRoutes } from './auth/oauthRoutes.js';
 import { handleMcpRequest } from './mcp/handler.js';
 
@@ -283,7 +283,7 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
 
 // === MCP surface ===
 // OAuthProvider owns /mcp (bearer-token gated), /token, /register and the OAuth metadata
-// endpoints. /authorize and /callback run the Cloudflare Access sign-in outside the
+// endpoints. /authorize runs the password sign-in (the web UI's credentials) outside the
 // main app's Basic auth; everything else falls through to the Hono app unchanged.
 let oauthProvider: OAuthProvider<Env> | undefined;
 
@@ -313,7 +313,7 @@ function getOAuthProvider(publicUrl: string): OAuthProvider<Env> {
 }
 
 const fetch: ExportedHandlerFetchHandler<Env> = (request, env, ctx) => {
-  // Until the Access OIDC app and allowlist are configured, MCP is off: /mcp gets a clear 503
+  // Until AUTH_USERNAME / AUTH_PASSWORD are set, MCP is off: /mcp gets a clear 503
   // and every other request goes straight to the app as before.
   if (isMcpAuthConfigured(env) && env.PUBLIC_URL !== undefined && env.PUBLIC_URL !== '') {
     return getOAuthProvider(env.PUBLIC_URL).fetch(request, env, ctx);

@@ -17,36 +17,31 @@ Prompts: `reconnect` (one person → summary + draft), `who_to_reconnect_with` (
 
 ## Auth
 
-OAuth 2.1 via `@cloudflare/workers-oauth-provider`. `/authorize` hands sign-in to a
-**Cloudflare Access for SaaS (OIDC)** app, so no Okta is needed (same pattern as marvin in
-`rocketsciencegg/bots`). After sign-in, the email must also be in `MCP_ALLOWED_EMAILS`, and the
-user approves the client on a consent page. Until the Access secrets and allowlist are set,
-`/mcp` returns 503 and nothing else changes. The web UI keeps its Basic auth.
+OAuth 2.1 via `@cloudflare/workers-oauth-provider` (MCP clients need OAuth). The sign-in at
+`/authorize` is one form: the web UI's `AUTH_USERNAME` / `AUTH_PASSWORD`, plus a consent screen
+showing which app connects and where its access goes.
 
-## Setup (once)
+- The grant stores a fingerprint of the credentials; every `/mcp` request re-checks it, so
+  changing `AUTH_PASSWORD` signs out every connected client.
+- 5 failed sign-ins per IP per 15 minutes, then 429. CSRF cookie + same-origin check on the POST.
+- Access tokens last 1 hour, refresh tokens 30 days.
+- Until both credentials are set, `/mcp` returns 503.
 
-1. Cloudflare dashboard, **Rocket Science Group** account → Zero Trust → Access → Applications →
-   Add an application → **SaaS** → choose **OIDC**.
-   - Redirect URL: `https://sigparser.rocketsciencegg.workers.dev/callback`
-   - Scopes: `openid`, `email`, `profile`. Turn PKCE on.
-   - Login method: One-time PIN (or Google). Policy: Allow, emails = your address.
-   - Note the **Client ID**, **Client secret**, and the team domain (`<team>.cloudflareaccess.com`).
-2. Secrets (wrangler.toml pins the account):
+## Setup
+
+1. Set the credentials (also the web UI login):
    ```bash
-   npx wrangler secret put ACCESS_TEAM_DOMAIN         # <team> or <team>.cloudflareaccess.com
-   npx wrangler secret put ACCESS_OIDC_CLIENT_ID
-   npx wrangler secret put ACCESS_OIDC_CLIENT_SECRET
-   npx wrangler secret put MCP_ALLOWED_EMAILS         # comma-separated
-   npx wrangler secret put MY_OTHER_EMAILS            # optional: your old addresses, hidden from results
-   npx wrangler secret put MY_ROLES                   # optional: employment timeline JSON (below)
+   npx wrangler secret put AUTH_USERNAME
+   npx wrangler secret put AUTH_PASSWORD
+   npx wrangler secret put MY_OTHER_EMAILS   # optional: your old addresses, hidden from results
+   npx wrangler secret put MY_ROLES          # optional: employment timeline JSON (below)
    ```
-3. Optional: `MCP_GMAIL_ACCOUNTS` (`work` by default; `work,personal` to also read personal mail).
-4. Deploy: `just deploy`.
-5. Connect a client:
+2. Optional: `MCP_GMAIL_ACCOUNTS` (`work` by default; `work,personal` to also read personal mail).
+3. Connect a client:
    ```bash
    claude mcp add --transport http sigparser https://sigparser.rocketsciencegg.workers.dev/mcp
    ```
-   The first call opens the browser for Access sign-in and the consent page.
+   The first call opens the browser on the sign-in form.
 
 ## "Where was I then?" (`MY_ROLES`)
 
