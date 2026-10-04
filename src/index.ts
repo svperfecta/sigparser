@@ -324,7 +324,14 @@ const fetch: ExportedHandlerFetchHandler<Env> = (request, env, ctx) => {
   if (isMcpAuthConfigured(env) && env.PUBLIC_URL !== undefined && env.PUBLIC_URL !== '') {
     return getOAuthProvider(env.PUBLIC_URL).fetch(request, env, ctx);
   }
-  if (new URL(request.url).pathname.startsWith('/mcp')) {
+  // Answer the MCP and OAuth endpoints with the real reason, not the web UI's Basic-auth 401
+  // (which MCP clients report as a confusing "client registration rejected").
+  const path = new URL(request.url).pathname;
+  if (
+    path.startsWith('/mcp') ||
+    ['/register', '/token', '/authorize'].includes(path) ||
+    path.startsWith('/.well-known/oauth-')
+  ) {
     return Response.json(
       {
         error: 'MCP is unavailable: set AUTH_USERNAME and an AUTH_PASSWORD of 20+ characters',
