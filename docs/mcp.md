@@ -4,14 +4,24 @@
 
 ## Tools
 
-| Tool | Use |
-|------|-----|
-| `search_contacts` | By email `domain` (subdomains included) and/or `query`; `two_way_only`; sort by `strength` (reciprocity = min(sent, received)), `last_seen`, `emails_to`, `emails_from` |
-| `find_dormant_contacts` | Two-way relationships quiet for `quiet_for_days` (default 365), optionally only those active within `active_within_days` |
-| `get_contact` | One contact by `id` or `email` |
-| `get_conversation_context` | Reads Gmail **live** for the newest threads with a contact: subject, dates, participants, last messages (quoted history stripped). sigparser stores no message text. |
-| `search_companies`, `get_company` | Company lookups |
-| `sync_status` | Sync freshness and which mailboxes `get_conversation_context` may read |
+Every tool has a title, a description that ends with a `Returns:` line, a description on every
+parameter, and an `outputSchema`. Results come back as `structuredContent` (validated against that
+schema) and as the same JSON in text. Not-found and bad input come back as `isError` results.
+
+| Tool | Use | Returns |
+|------|-----|---------|
+| `search_contacts` | By email `domain` (subdomains included) and/or `query`; `two_way_only`; `sort` | `{ contacts: ContactSummary[], pagination }` |
+| `find_dormant_contacts` | Two-way relationships quiet for `quiet_for_days` (default 365), optionally only those active within `active_within_days` | `{ contacts: ContactSummary[], pagination }` |
+| `get_contact` | One person by `id` or `email` | `ContactSummary` |
+| `get_conversation_context` | Reads Gmail **live** for the newest threads with a person (sigparser stores no message text) | `{ contact, lastTalked, threads[], searchedAccounts, errors }` |
+| `search_companies` | Companies by part of name or domain | `{ companies: CompanySummary[], pagination }` |
+| `get_company` | One company by `id` or `domain` | `CompanySummary + { domains, contactCount, topContacts }` |
+| `sync_status` | Data freshness and readable mailboxes | `{ accounts: [{ account, lastSync, catchingUp, backfillDate }], readableMailboxes }` |
+
+`ContactSummary` (one shape everywhere): `id, name, emails[], companyId, companyName, emailsTo,
+emailsFrom, emailsIncluded, firstSeen, lastSeen, yourCompanyWhenMet, yourCompanyLastTalked`.
+`sort=strength` ranks by reciprocity, min(emailsTo, emailsFrom). The schemas live in
+`src/mcp/schemas.ts`; a test fails if a tool or parameter loses its description.
 
 Prompts: `reconnect` (one person → summary + draft), `who_to_reconnect_with` (ranked table).
 

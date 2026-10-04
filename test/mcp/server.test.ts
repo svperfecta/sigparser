@@ -37,50 +37,73 @@ function seed(sqlite: ReturnType<typeof createTestD1>['sqlite']): void {
   contact('c5', 'Me Old', 50, 50, iso(800), 'me@old.com', 'other.com');
 }
 
-async function post(
-  name: string,
-  args: Record<string, unknown>,
+const META = {
+  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+  'io.modelcontextprotocol/clientCapabilities': {},
+  'io.modelcontextprotocol/clientInfo': { name: 'test', version: '1' },
+};
+
+async function rpc(
+  method: string,
+  params: Record<string, unknown>,
   props: unknown,
 ): Promise<Response> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    'MCP-Protocol-Version': '2026-07-28',
+    'Mcp-Method': method,
+  };
+  if (typeof params.name === 'string') {
+    headers['Mcp-Name'] = params.name;
+  }
   const request = new Request('https://sigparser.example.com/mcp', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      'MCP-Protocol-Version': '2026-07-28',
-      'Mcp-Method': 'tools/call',
-      'Mcp-Name': name,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name,
-        arguments: args,
-        _meta: {
-          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-          'io.modelcontextprotocol/clientCapabilities': {},
-          'io.modelcontextprotocol/clientInfo': { name: 'test', version: '1' },
-        },
-      },
-    }),
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: META } }),
   });
   return handleMcpRequest(request, env, { props } as unknown as ExecutionContext);
 }
 
-async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const fingerprint = await credentialFingerprint(env);
-  const response = await post(name, args, { username: 'owner', fingerprint });
+function post(name: string, args: Record<string, unknown>, props: unknown): Promise<Response> {
+  return rpc('tools/call', { name, arguments: args }, props);
+}
+
+async function result<T>(response: Response): Promise<T> {
   const raw = await response.text();
   const json = raw.startsWith('{')
     ? raw
     : (raw.split('\n').find((l) => l.startsWith('data: ')) ?? '').slice(6);
-  const body = JSON.parse(json) as { result?: { content: { text: string }[] }; error?: unknown };
+  const body = JSON.parse(json) as { result?: T; error?: unknown };
   if (body.result === undefined) {
     throw new Error(`MCP error: ${JSON.stringify(body)}`);
   }
-  return JSON.parse(body.result.content[0]!.text);
+  return body.result;
+}
+
+async function ownerProps(): Promise<unknown> {
+  return { username: 'owner', fingerprint: await credentialFingerprint(env) };
+}
+
+interface ToolResult {
+  content: { text: string }[];
+  structuredContent?: unknown;
+  isError?: boolean;
+}
+
+async function callToolResult(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  return result<ToolResult>(await post(name, args, await ownerProps()));
+}
+
+async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const r = await callToolResult(name, args);
+  if (r.isError === true) {
+    throw new Error(`Tool error: ${r.content[0]?.text ?? ''}`);
+  }
+  // Text and structured output must carry the same data.
+  const fromText: unknown = JSON.parse(r.content[0]!.text);
+  expect(r.structuredContent).toEqual(fromText);
+  return fromText;
 }
 
 describe('MCP server', () => {
@@ -108,10 +131,10 @@ describe('MCP server', () => {
       domain: 'acme.com',
       two_way_only: true,
     })) as {
-      contacts: { id: string; emails: string }[];
+      contacts: { id: string; emails: string[] }[];
     };
     expect(result.contacts.map((c) => c.id)).toEqual(['c2', 'c1']);
-    expect(result.contacts[1]!.emails).toBe('old@acme.com');
+    expect(result.contacts[1]!.emails).toEqual(['old@acme.com']);
   });
 
   it('find_dormant_contacts returns quiet two-way relationships, most reciprocal first, without the user', async () => {
@@ -175,5 +198,78 @@ describe('MCP server', () => {
     expect(result.searchedAccounts).toEqual([]);
     expect(result.threads).toEqual([]);
     expect(result.contact.addresses).toEqual(['old@acme.com']);
+  });
+
+  it('describes every tool: title, Returns line, output schema, and every input parameter', async () => {
+    const list = await result<{
+      tools: {
+        name: string;
+        title?: string;
+        description: string;
+        inputSchema: { properties?: Record<string, { description?: string }> };
+        outputSchema?: { type: string };
+      }[];
+    }>(await rpc('tools/list', {}, await ownerProps()));
+    expect(list.tools.map((t) => t.name).sort()).toEqual([
+      'find_dormant_contacts',
+      'get_company',
+      'get_contact',
+      'get_conversation_context',
+      'search_companies',
+      'search_contacts',
+      'sync_status',
+    ]);
+    for (const tool of list.tools) {
+      expect(tool.title, tool.name).toBeTruthy();
+      expect(tool.description, tool.name).toMatch(/Returns:/);
+      expect(tool.outputSchema?.type, tool.name).toBe('object');
+      for (const [param, schema] of Object.entries(tool.inputSchema.properties ?? {})) {
+        expect(schema.description, `${tool.name}.${param}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('get_contact returns the shared contact shape by id or email', async () => {
+    const byEmail = (await callTool('get_contact', { email: 'OLD@acme.com' })) as {
+      id: string;
+      emails: string[];
+      companyName: string;
+      emailsTo: number;
+    };
+    expect(byEmail).toMatchObject({
+      id: 'c1',
+      emails: ['old@acme.com'],
+      companyName: 'Acme',
+      emailsTo: 20,
+    });
+    expect(await callTool('get_contact', { id: 'c1' })).toEqual(byEmail);
+  });
+
+  it('reports not-found as a tool error, not as data', async () => {
+    const r = await callToolResult('get_contact', { email: 'nobody@nowhere.com' });
+    expect(r.isError).toBe(true);
+    expect(r.content[0]!.text).toMatch(/Not found/);
+    expect((await callToolResult('get_company', { domain: 'unknown.com' })).isError).toBe(true);
+  });
+
+  it('get_company returns domains and strongest contacts, without the user', async () => {
+    const company = (await callTool('get_company', { domain: 'eu.acme.com' })) as {
+      id: string;
+      domains: string[];
+      topContacts: { id: string }[];
+    };
+    expect(company.id).toBe('co1');
+    expect(company.domains.sort()).toEqual(['acme.com', 'eu.acme.com', 'other.com']);
+    expect(company.topContacts.map((c) => c.id)).toEqual(['c2', 'c1', 'c4', 'c3']);
+  });
+
+  it('sync_status says whether each account is catching up', async () => {
+    const status = (await callTool('sync_status', {})) as {
+      accounts: { account: string; catchingUp: boolean }[];
+      readableMailboxes: string[];
+    };
+    expect(status.accounts.map((a) => a.account)).toEqual(['work', 'personal']);
+    expect(status.accounts.every((a) => !a.catchingUp)).toBe(true);
+    expect(status.readableMailboxes).toEqual([]);
   });
 });

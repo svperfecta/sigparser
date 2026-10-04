@@ -2,77 +2,93 @@ import { McpServer, type CallToolResult, type GetPromptResult } from '@modelcont
 import { z } from 'zod';
 import type { Env } from '../types/index.js';
 import { CompanyRepository } from '../repositories/company.js';
-import { ContactRepository } from '../repositories/contact.js';
 import { DomainRepository } from '../repositories/domain.js';
 import { EmailRepository } from '../repositories/email.js';
-import { RelationshipRepository } from '../repositories/relationship.js';
+import { RelationshipRepository, type RelationshipFilter } from '../repositories/relationship.js';
 import { getConversationContext, readableAccounts } from '../services/conversation.js';
-import { companiesAt, ownEmails, parseRoles, type Role } from '../services/roles.js';
+import { ownEmails, parseRoles } from '../services/roles.js';
 import { getSyncStatus } from '../services/sync.js';
 import { parsePagination, paginationMeta } from '../utils/pagination.js';
+import {
+  companyDetailSchema,
+  companyListSchema,
+  contactListSchema,
+  contactSummarySchema,
+  conversationSchema,
+  syncStatusSchema,
+  toCompanyDetail,
+  toCompanySummary,
+  toContactSummary,
+} from './schemas.js';
 
-const COMPANY_SORTS = [
-  'emails_from',
-  'emails_to',
-  'last_seen',
-  'first_seen',
-  'name',
-  'created_at',
-] as const;
-const RELATIONSHIP_SORTS = ['strength', 'last_seen', 'emails_to', 'emails_from'] as const;
+const COMPANY_SORTS = ['last_seen', 'emails_from', 'emails_to', 'first_seen', 'name'] as const;
+const CONTACT_SORTS = ['strength', 'last_seen', 'emails_to', 'emails_from'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const INSTRUCTIONS = `sigparser is the user's private contact database, mined from their Gmail (work and personal).
 Entities: company -> domains, company -> contacts, contact -> email addresses.
-Per-contact stats: emails_to (the user emailed them), emails_from (they emailed the user),
-emails_included (cc'd together), first_seen / last_seen (ISO timestamps of the last email either way).
-"strength" = min(emails_to, emails_from): reciprocity, so newsletters and one-way senders rank low.
+Contact stats: emailsTo (the user emailed them), emailsFrom (they emailed the user),
+emailsIncluded (both on the same email), firstSeen / lastSeen (first / last email either way).
+"strength" = min(emailsTo, emailsFrom): reciprocity, so newsletters and one-way senders rank low.
 
 Typical flows:
 - "Who do I know at acme.com?" -> search_contacts { domain: "acme.com" }.
 - "Who should I reconnect with?" -> find_dormant_contacts, then get_conversation_context for each pick.
-- "What did we last talk about?" -> get_conversation_context { email } returns the newest Gmail threads live.
+- "What did we last talk about?" -> get_conversation_context { email } reads Gmail live.
 
-yourCompanyWhenMet / yourCompanyLastTalked say where the user worked at first_seen / last_seen
-(from the user's MY_ROLES timeline; null if not configured). get_conversation_context returns
-lastTalked { date, subject, yourCompanyThen, lastWriter } so you can say e.g. "You last talked in
-2017, when you were at MadGlory, about the Q3 launch; they wrote last."
+yourCompanyWhenMet / yourCompanyLastTalked say where the user worked at firstSeen / lastSeen; null
+when the user's employment timeline (MY_ROLES) does not cover that date. get_conversation_context
+returns lastTalked { date, subject, yourCompanyThen, lastWriter } so you can say e.g. "You last
+talked in 2017, when you were at MadGlory, about the Q3 launch; they wrote last."
 
-Stats come from the sync and can lag; get_conversation_context reads Gmail live, so trust its dates
-over last_seen. It only reads the mailboxes listed in sync_status.readableMailboxes.
+Stats come from the sync and can lag (see sync_status); get_conversation_context reads Gmail live,
+so trust its dates over lastSeen. It only reads the mailboxes in sync_status.readableMailboxes.
+List tools are paginated: request page + 1 until page = pagination.totalPages.
 Every tool is read-only; nothing here sends or drafts email.`;
 
-function asToolResult(result: unknown): CallToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+// Reads Gmail, an external system, at call time.
+const READ_ONLY_EXTERNAL = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
+
+function ok(result: Record<string, unknown>): CallToolResult {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    structuredContent: result,
+  };
+}
+
+function fail(message: string): CallToolResult {
+  return { content: [{ type: 'text', text: message }], isError: true };
 }
 
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString();
 }
 
-const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-// Reads Gmail, an external system, at call time.
-const READ_ONLY_EXTERNAL = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
-
-/** Tag relationship rows with where the user worked when they met and when they last talked. */
-function withYourCompany<T extends { first_seen: string | null; last_seen: string | null }>(
-  roles: Role[],
-  rows: T[],
-): (T & { yourCompanyWhenMet: string | null; yourCompanyLastTalked: string | null })[] {
-  const at = (date: string | null): string | null => {
-    const companies = companiesAt(roles, date);
-    return companies.length > 0 ? companies.join(' / ') : null;
-  };
-  return rows.map((row) => ({
-    ...row,
-    yourCompanyWhenMet: at(row.first_seen),
-    yourCompanyLastTalked: at(row.last_seen),
-  }));
-}
-
+// Shared input fields, described once.
+const limitArg = z.number().int().min(1).max(100).default(25).describe('Results per page (1-100)');
+const pageArg = z
+  .number()
+  .int()
+  .min(1)
+  .default(1)
+  .describe('Page number, from 1; see pagination.totalPages in the result');
+const domainArg = z
+  .string()
+  .optional()
+  .describe(
+    'Email domain such as "acme.com" or "@acme.com"; subdomains like eu.acme.com match too',
+  );
+const contactSortArg = z
+  .enum(CONTACT_SORTS)
+  .default('strength')
+  .describe(
+    'strength = min(emailsTo, emailsFrom), real two-way relationships first; last_seen = most ' +
+      'recent first; emails_to = most emailed by the user; emails_from = most emails to the user',
+  );
 const contactRef = {
-  id: z.string().optional().describe('Contact id from a search result'),
-  email: z.string().optional().describe('Any email address of the contact'),
+  id: z.string().optional().describe('Contact id from a search result (preferred)'),
+  email: z.string().optional().describe('Any email address of the contact, if no id'),
 };
 
 /**
@@ -81,16 +97,33 @@ const contactRef = {
  */
 export function createMcpServer(env: Env): McpServer {
   const server = new McpServer(
-    { name: 'sigparser', version: '1.0.0' },
+    { name: 'sigparser', version: '1.1.0' },
     { instructions: INSTRUCTIONS },
   );
-  const contacts = new ContactRepository(env.DB);
   const companies = new CompanyRepository(env.DB);
   const domains = new DomainRepository(env.DB);
   const emails = new EmailRepository(env.DB);
   const relationships = new RelationshipRepository(env.DB);
   const roles = parseRoles(env);
   const own = ownEmails(env, roles);
+
+  async function findContacts(
+    filter: RelationshipFilter,
+    sort: (typeof CONTACT_SORTS)[number],
+    limit: number,
+    page: number,
+  ): Promise<Record<string, unknown>> {
+    const { contacts, total } = await relationships.find(
+      { ...filter, excludeEmails: own },
+      sort,
+      limit,
+      (page - 1) * limit,
+    );
+    return {
+      contacts: contacts.map((row) => toContactSummary(roles, row)),
+      pagination: paginationMeta(page, limit, total),
+    };
+  }
 
   async function resolveContactId(id?: string, email?: string): Promise<string | undefined> {
     if (id !== undefined) {
@@ -107,39 +140,37 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Search contacts',
       description:
-        'Find contacts by email domain (includes subdomains), and/or a substring of name or email. ' +
-        'Returns addresses, company and interaction stats. Sort by strength (reciprocity, default), last_seen, emails_to or emails_from.',
+        'Find people by email domain and/or part of a name or email address, e.g. "who do I know ' +
+        'at acme.com?". With no filters, lists everyone. ' +
+        'Returns: { contacts: ContactSummary[], pagination }, where each contact has its addresses, ' +
+        'company, email counts in both directions, first/last seen, and where the user worked then.',
       inputSchema: z.object({
-        domain: z.string().optional().describe('Email domain, e.g. "acme.com" or "@acme.com"'),
-        query: z.string().optional().describe('Substring of name or email address'),
+        domain: domainArg,
+        query: z
+          .string()
+          .optional()
+          .describe('Case-insensitive substring of the name or of any email address'),
         two_way_only: z
           .boolean()
           .default(false)
-          .describe('Only people who both emailed the user and were emailed by the user'),
-        sort: z.enum(RELATIONSHIP_SORTS).default('strength'),
-        limit: z.number().int().min(1).max(100).default(25),
-        page: z.number().int().min(1).default(1),
+          .describe('Only people who emailed the user AND were emailed by the user'),
+        sort: contactSortArg,
+        limit: limitArg,
+        page: pageArg,
       }),
+      outputSchema: contactListSchema,
       annotations: READ_ONLY,
     },
     async ({ domain, query, two_way_only, sort, limit, page }) => {
       const minimum = two_way_only ? 1 : 0;
-      const { contacts: rows, total } = await relationships.find(
-        {
-          domain,
-          query,
-          minEmailsTo: minimum,
-          minEmailsFrom: minimum,
-          excludeEmails: own,
-        },
-        sort,
-        limit,
-        (page - 1) * limit,
+      return ok(
+        await findContacts(
+          { domain, query, minEmailsTo: minimum, minEmailsFrom: minimum },
+          sort,
+          limit,
+          page,
+        ),
       );
-      return asToolResult({
-        contacts: withYourCompany(roles, rows),
-        pagination: paginationMeta(page, limit, total),
-      });
     },
   );
 
@@ -148,69 +179,87 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Find people to reconnect with',
       description:
-        'Real two-way relationships that have gone quiet: people the user exchanged email with ' +
-        '(at least min_emails_to sent and min_emails_from received) but not in the last quiet_for_days. ' +
-        'Ranked by relationship strength by default. Follow up with get_conversation_context for the last thread.',
+        'Real two-way relationships that have gone quiet: people the user exchanged email with, ' +
+        'but not in the last quiet_for_days. Use for "who should I reconnect with?". Then call ' +
+        'get_conversation_context on the picks to see the last topic. ' +
+        'Returns: { contacts: ContactSummary[], pagination }, strongest relationships first by default.',
       inputSchema: z.object({
         quiet_for_days: z
           .number()
           .int()
           .min(1)
           .default(365)
-          .describe('No email either way for this long'),
+          .describe('No email in either direction for at least this many days'),
         active_within_days: z
           .number()
           .int()
           .min(1)
           .optional()
-          .describe('Ignore relationships that ended longer ago than this (e.g. 1825 for 5 years)'),
-        min_emails_to: z.number().int().min(0).default(3),
-        min_emails_from: z.number().int().min(0).default(2),
-        domain: z.string().optional().describe('Limit to one email domain'),
-        sort: z.enum(RELATIONSHIP_SORTS).default('strength'),
-        limit: z.number().int().min(1).max(100).default(25),
-        page: z.number().int().min(1).default(1),
+          .describe(
+            'Only relationships whose last email is within this many days (e.g. 1825 = 5 years), ' +
+              'to skip ancient contacts',
+          ),
+        min_emails_to: z
+          .number()
+          .int()
+          .min(0)
+          .default(3)
+          .describe('Minimum emails the user sent to them'),
+        min_emails_from: z
+          .number()
+          .int()
+          .min(0)
+          .default(2)
+          .describe('Minimum emails they sent to the user'),
+        domain: domainArg,
+        sort: contactSortArg,
+        limit: limitArg,
+        page: pageArg,
       }),
+      outputSchema: contactListSchema,
       annotations: READ_ONLY,
     },
-    async (args) => {
-      const { contacts: rows, total } = await relationships.find(
-        {
-          domain: args.domain,
-          minEmailsTo: args.min_emails_to,
-          minEmailsFrom: args.min_emails_from,
-          lastSeenBefore: daysAgoIso(args.quiet_for_days),
-          lastSeenAfter:
-            args.active_within_days !== undefined ? daysAgoIso(args.active_within_days) : undefined,
-          excludeEmails: own,
-        },
-        args.sort,
-        args.limit,
-        (args.page - 1) * args.limit,
-      );
-      return asToolResult({
-        contacts: withYourCompany(roles, rows),
-        pagination: paginationMeta(args.page, args.limit, total),
-        note: 'last_seen comes from the sync and can lag; confirm with get_conversation_context.',
-      });
-    },
+    async (args) =>
+      ok(
+        await findContacts(
+          {
+            domain: args.domain,
+            minEmailsTo: args.min_emails_to,
+            minEmailsFrom: args.min_emails_from,
+            lastSeenBefore: daysAgoIso(args.quiet_for_days),
+            lastSeenAfter:
+              args.active_within_days !== undefined
+                ? daysAgoIso(args.active_within_days)
+                : undefined,
+          },
+          args.sort,
+          args.limit,
+          args.page,
+        ),
+      ),
   );
 
   server.registerTool(
     'get_contact',
     {
       title: 'Get contact',
-      description: 'One contact with all email addresses, company and stats. Pass id or email.',
+      description:
+        'One person by id or by any of their email addresses. ' +
+        'Returns: ContactSummary (addresses, company, email counts, first/last seen, where the user worked then).',
       inputSchema: z.object(contactRef),
+      outputSchema: contactSummarySchema,
       annotations: READ_ONLY,
     },
     async ({ id, email }) => {
       const contactId = await resolveContactId(id, email);
       if (contactId === undefined) {
-        return asToolResult({ error: 'Pass id or a known email address' });
+        return fail('Not found: pass a contact id, or an email address that sigparser knows.');
       }
-      const contact = await contacts.findByIdWithDetails(contactId);
-      return asToolResult(contact ?? { error: 'Contact not found' });
+      const { contacts } = await relationships.find({ contactId }, 'strength', 1, 0);
+      const row = contacts[0];
+      return row === undefined
+        ? fail(`Contact ${contactId} not found.`)
+        : ok(toContactSummary(roles, row));
     },
   );
 
@@ -219,41 +268,52 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Last conversation with a contact',
       description:
-        "Reads Gmail live for the newest threads involving any of the contact's addresses. Returns subject, " +
-        'date, participants and the text of the last messages in each thread (quoted history stripped). ' +
-        'Use before reaching out, to know what was last discussed and who spoke last.',
+        "Reads Gmail live for the newest threads with any of a person's addresses. Use before " +
+        'reaching out, to know what was last discussed, when, and who wrote last. Works for ' +
+        'addresses sigparser does not know too. ' +
+        'Returns: { contact, lastTalked: { date, subject, yourCompanyThen, lastWriter } | null, ' +
+        'threads: [{ subject, dates, lastWriter, you, messages: [{ date, from, to, cc, text }] }], ' +
+        'searchedAccounts, errors }. Message text has quoted history and signatures removed.',
       inputSchema: z.object({
         ...contactRef,
-        threads: z.number().int().min(1).max(5).default(1),
-        messages_per_thread: z.number().int().min(1).max(10).default(3),
+        threads: z
+          .number()
+          .int()
+          .min(1)
+          .max(5)
+          .default(1)
+          .describe('How many recent threads to return, newest first'),
+        messages_per_thread: z
+          .number()
+          .int()
+          .min(1)
+          .max(10)
+          .default(3)
+          .describe('How many of the last messages to include from each thread'),
       }),
+      outputSchema: conversationSchema,
       annotations: READ_ONLY_EXTERNAL,
     },
     async ({ id, email, threads, messages_per_thread }) => {
+      const options = { threads, messagesPerThread: messages_per_thread };
       const contactId = await resolveContactId(id, email);
       if (contactId === undefined) {
-        // Unknown to sigparser, but Gmail may still know them.
         if (email === undefined) {
-          return asToolResult({ error: 'Pass id or email' });
+          return fail('Not found: pass a contact id, or an email address.');
         }
-        return asToolResult(
-          await getConversationContext(env, [email.trim().toLowerCase()], {
-            threads,
-            messagesPerThread: messages_per_thread,
-          }),
-        );
+        // Unknown to sigparser, but Gmail may still know them.
+        const address = email.trim().toLowerCase();
+        const context = await getConversationContext(env, [address], options);
+        return ok({ contact: { id: null, name: null, addresses: [address] }, ...context });
       }
+      const { contacts } = await relationships.find({ contactId }, 'strength', 1, 0);
       const addresses = (await emails.findByContactId(contactId)).map((e) => e.email);
       if (addresses.length === 0) {
-        return asToolResult({ error: 'Contact has no email addresses' });
+        return fail(`Contact ${contactId} has no email addresses.`);
       }
-      const contact = await contacts.findById(contactId);
-      const context = await getConversationContext(env, addresses, {
-        threads,
-        messagesPerThread: messages_per_thread,
-      });
-      return asToolResult({
-        contact: { id: contactId, name: contact?.name ?? null, addresses },
+      const context = await getConversationContext(env, addresses, options);
+      return ok({
+        contact: { id: contactId, name: contacts[0]?.name ?? null, addresses },
         ...context,
       });
     },
@@ -263,14 +323,23 @@ export function createMcpServer(env: Env): McpServer {
     'search_companies',
     {
       title: 'Search companies',
-      description: 'Search and list companies by substring of company name or domain.',
+      description:
+        'Find companies by part of the company name or of one of its email domains. With no ' +
+        'query, lists all. Returns: { companies: CompanySummary[], pagination }; each has email ' +
+        'counts across everyone at the company and first/last seen. Use get_company for people.',
       inputSchema: z.object({
-        query: z.string().optional(),
-        sort: z.enum(COMPANY_SORTS).default('last_seen'),
-        order: z.enum(['asc', 'desc']).default('desc'),
-        limit: z.number().int().min(1).max(100).default(25),
-        page: z.number().int().min(1).default(1),
+        query: z.string().optional().describe('Case-insensitive substring of name or domain'),
+        sort: z
+          .enum(COMPANY_SORTS)
+          .default('last_seen')
+          .describe(
+            'last_seen = most recent contact; emails_from / emails_to = volume; first_seen; name',
+          ),
+        order: z.enum(['asc', 'desc']).default('desc').describe('Sort direction'),
+        limit: limitArg,
+        page: pageArg,
       }),
+      outputSchema: companyListSchema,
       annotations: READ_ONLY,
     },
     async ({ query, sort, order, limit, page }) => {
@@ -280,7 +349,10 @@ export function createMcpServer(env: Env): McpServer {
         [...COMPANY_SORTS],
       );
       const { companies: rows, total } = await companies.list(pagination, query);
-      return asToolResult({ companies: rows, pagination: paginationMeta(page, limit, total) });
+      return ok({
+        companies: rows.map(toCompanySummary),
+        pagination: paginationMeta(page, limit, total),
+      });
     },
   );
 
@@ -289,12 +361,21 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Get company',
       description:
-        'One company with its domains, contact count and strongest contacts. Pass id or domain.',
+        'One company by id or by one of its email domains, with the people the user knows there. ' +
+        'Returns: CompanySummary + { domains, contactCount, topContacts: ContactSummary[] } ' +
+        '(strongest relationships first).',
       inputSchema: z.object({
-        id: z.string().optional(),
-        domain: z.string().optional(),
-        contact_limit: z.number().int().min(0).max(100).default(25),
+        id: z.string().optional().describe('Company id from a search result (preferred)'),
+        domain: z.string().optional().describe('One of its email domains, e.g. "acme.com"'),
+        contact_limit: z
+          .number()
+          .int()
+          .min(0)
+          .max(100)
+          .default(25)
+          .describe('How many contacts to include in topContacts (0 for none)'),
       }),
+      outputSchema: companyDetailSchema,
       annotations: READ_ONLY,
     },
     async ({ id, domain, contact_limit }) => {
@@ -304,21 +385,29 @@ export function createMcpServer(env: Env): McpServer {
           ?.companyId;
       }
       if (companyId === undefined) {
-        return asToolResult({ error: 'Pass id or a known domain' });
+        return fail('Not found: pass a company id, or a domain that sigparser knows.');
       }
       const company = await companies.findByIdWithDomains(companyId);
       if (company === null) {
-        return asToolResult({ error: 'Company not found' });
+        return fail(`Company ${companyId} not found.`);
       }
       const top =
         contact_limit > 0
-          ? await contacts.list(
-              parsePagination({ limit: String(contact_limit) }, 'emails_from', ['emails_from']),
-              undefined,
-              companyId,
-            )
-          : { contacts: [] };
-      return asToolResult({ ...company, topContacts: top.contacts });
+          ? (
+              await relationships.find(
+                { companyId, excludeEmails: own },
+                'strength',
+                contact_limit,
+                0,
+              )
+            ).contacts
+          : [];
+      return ok(
+        toCompanyDetail(
+          company,
+          top.map((row) => toContactSummary(roles, row)),
+        ),
+      );
     },
   );
 
@@ -327,15 +416,26 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Sync status',
       description:
-        'Gmail sync state per account and which mailboxes get_conversation_context may read. Use to judge freshness.',
+        'How current the data is, per Gmail account, and which mailboxes get_conversation_context ' +
+        'may read. Check when lastSeen dates look stale. ' +
+        'Returns: { accounts: [{ account, lastSync, catchingUp, backfillDate }], readableMailboxes }.',
       inputSchema: z.object({}),
+      outputSchema: syncStatusSchema,
       annotations: READ_ONLY,
     },
-    async () =>
-      asToolResult({
-        accounts: await getSyncStatus(env.DB),
-        readableMailboxes: readableAccounts(env),
-      }),
+    async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const accounts = (await getSyncStatus(env.DB)).map((s) => {
+        const catchingUp = s.batchCurrentDate !== null && s.batchCurrentDate <= today;
+        return {
+          account: s.account,
+          lastSync: s.lastSync,
+          catchingUp,
+          backfillDate: catchingUp ? s.batchCurrentDate : null,
+        };
+      });
+      return ok({ accounts, readableMailboxes: readableAccounts(env) });
+    },
   );
 
   server.registerPrompt(
@@ -343,7 +443,7 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: 'Reconnect with someone',
       description:
-        'Look up a contact and their last conversation, then draft a natural note to reopen it.',
+        'Look up a person and the last conversation, then draft a short note to reopen it.',
       argsSchema: z.object({
         who: z.string().describe('Name or email address'),
         goal: z.string().optional().describe('Optional reason for reaching out'),
@@ -357,11 +457,11 @@ export function createMcpServer(env: Env): McpServer {
             type: 'text',
             text:
               `I want to reconnect with ${who}.${goal !== undefined ? ` My goal: ${goal}.` : ''}\n\n` +
-              '1. Find them with search_contacts (by email, or name via query).\n' +
-              '2. Call get_conversation_context with threads: 3 to see what we last talked about, when, and who replied last.\n' +
-              '3. Summarize the relationship in 3 bullets (how long we have known each other, volume, last topic).\n' +
+              '1. Find them with search_contacts (query = name or email).\n' +
+              '2. Call get_conversation_context with threads: 3 to see what we last talked about, when, and who wrote last.\n' +
+              '3. Summarize the relationship in 3 bullets: how long we have known each other (and where I worked then), volume, last topic.\n' +
               '4. Draft a short, warm email that picks up from the last topic. No "just checking in" filler; ' +
-              'reference something specific. If they were the last to write and I never replied, acknowledge it.',
+              'reference something specific. If they wrote last and I never replied, acknowledge it.',
           },
         },
       ],
@@ -392,7 +492,8 @@ export function createMcpServer(env: Env): McpServer {
               ', limit 20).\n' +
               '2. Skip obvious vendors, recruiters and automated senders.\n' +
               '3. For the top 8, call get_conversation_context and note the last topic and date.\n' +
-              '4. Give me a table: name, company, last contact, last topic, a one-line reason to reach out.',
+              '4. Give me a table: name, company, where I was then, last contact, last topic, ' +
+              'and a one-line reason to reach out.',
           },
         },
       ],

@@ -21,6 +21,8 @@ export interface RelationshipFilter {
   domain?: string | undefined;
   /** Substring match on name or email address. */
   query?: string | undefined;
+  companyId?: string | undefined;
+  contactId?: string | undefined;
   minEmailsTo?: number;
   minEmailsFrom?: number;
   lastSeenBefore?: string | undefined;
@@ -63,6 +65,14 @@ export class RelationshipRepository {
         '(c.name LIKE ? OR c.id IN (SELECT contact_id FROM emails WHERE email LIKE ?))',
       );
       params.push(`%${filter.query}%`, `%${filter.query}%`);
+    }
+    if (filter.contactId !== undefined) {
+      conditions.push('c.id = ?');
+      params.push(filter.contactId);
+    }
+    if (filter.companyId !== undefined) {
+      conditions.push('c.company_id = ?');
+      params.push(filter.companyId);
     }
     if (filter.minEmailsTo !== undefined && filter.minEmailsTo > 0) {
       conditions.push('c.emails_to >= ?');
