@@ -27,9 +27,7 @@ binding = "OAUTH_KV"
 id = "9ee38f66272841f684bf6973f2680bd3"
 
 [triggers]
-# Every minute while the Feb-Oct 2026 backfill runs; set back to "*/15 * * * *" once both
-# accounts in sync_state have batch_current_date past today.
-crons = ["* * * * *"]
+crons = ["*/15 * * * *"]  # Every 15 minutes
 
 [site]
 bucket = "./static"
