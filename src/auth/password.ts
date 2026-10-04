@@ -12,8 +12,10 @@ export interface McpGrantProps {
   fingerprint: string;
 }
 
-const MAX_FAILURES = 5;
-const FAILURE_WINDOW_SECONDS = 15 * 60;
+const MAX_ATTEMPTS_PER_CLIENT = 5;
+// sigparser has one user, so a global cap is the real brute-force bound: rotating IPs does not help.
+const MAX_ATTEMPTS_GLOBAL = 20;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 function isSet(value: string | undefined): value is string {
   return value !== undefined && value !== '';
@@ -72,17 +74,52 @@ export async function checkCredentials(
   return userOk && passOk;
 }
 
-/** True if this client may still try a password (fewer than MAX_FAILURES in the window). */
-export async function canAttemptLogin(kv: KVNamespace, clientIp: string): Promise<boolean> {
-  const raw = await kv.get(`mcp-login-fail:${clientIp}`);
-  return raw === null || Number(raw) < MAX_FAILURES;
+/**
+ * Rate-limit key for a client IP. IPv6 is grouped by /64, since one host can hold a whole /64.
+ */
+export function clientKey(ip: string): string {
+  if (!ip.includes(':')) {
+    return `ip:${ip}`;
+  }
+  const groups = ip.split('::')[0]?.split(':') ?? [];
+  return `ip6:${groups.slice(0, 4).join(':')}`;
 }
 
-export async function recordFailedLogin(kv: KVNamespace, clientIp: string): Promise<void> {
-  const key = `mcp-login-fail:${clientIp}`;
-  const raw = await kv.get(key);
-  const count = raw === null ? 1 : Number(raw) + 1;
-  await kv.put(key, String(count), { expirationTtl: FAILURE_WINDOW_SECONDS });
+/** Atomically count one attempt against `key` and return the count in the current window. */
+async function countAttempt(db: D1Database, key: string, now: number): Promise<number> {
+  const windowStart = now - ATTEMPT_WINDOW_MS;
+  const row = await db
+    .prepare(
+      `INSERT INTO login_attempts (key, count, window_start) VALUES (?1, 1, ?2)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE WHEN window_start < ?3 THEN 1 ELSE count + 1 END,
+         window_start = CASE WHEN window_start < ?3 THEN ?2 ELSE window_start END
+       RETURNING count`,
+    )
+    .bind(key, now, windowStart)
+    .first<{ count: number }>();
+  return row?.count ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Count a sign-in attempt BEFORE the password is checked, per client and globally, and say
+ * whether it may proceed. Counting first means a burst of parallel guesses cannot slip past.
+ */
+export async function admitLoginAttempt(
+  db: D1Database,
+  clientIp: string,
+  now = Date.now(),
+): Promise<boolean> {
+  const [perClient, global] = await Promise.all([
+    countAttempt(db, clientKey(clientIp), now),
+    countAttempt(db, 'global', now),
+  ]);
+  return perClient <= MAX_ATTEMPTS_PER_CLIENT && global <= MAX_ATTEMPTS_GLOBAL;
+}
+
+/** After a successful sign-in, clear that client's counter (the global one keeps its window). */
+export async function clearLoginAttempts(db: D1Database, clientIp: string): Promise<void> {
+  await db.prepare('DELETE FROM login_attempts WHERE key = ?').bind(clientKey(clientIp)).run();
 }
 
 /** Grant props from ctx.props, if they have the expected shape. */

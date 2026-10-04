@@ -23,21 +23,25 @@ showing which app connects and where its access goes.
 
 - The grant stores a fingerprint of the credentials; every `/mcp` request re-checks it, so
   changing `AUTH_PASSWORD` signs out every connected client.
-- 5 failed sign-ins per IP per 15 minutes, then 429. CSRF cookie + same-origin check on the POST.
+- Sign-in attempts are counted in D1 (atomic, before the password check): 5 per IP (IPv6 per /64)
+  and 20 in total per 15 minutes, then 429. A burst of guesses from many IPs can lock you out
+  for up to 15 minutes; that is the trade-off for a single-user app. CSRF cookie + same-origin
+  check on the POST.
 - Access tokens last 1 hour, refresh tokens 30 days.
 - Until both credentials are set, `/mcp` returns 503.
 
 ## Setup
 
-1. Set the credentials (also the web UI login):
+1. Apply the migrations (adds `login_attempts`): `npm run db:migrate:remote`
+2. Set the credentials (also the web UI login):
    ```bash
    npx wrangler secret put AUTH_USERNAME
    npx wrangler secret put AUTH_PASSWORD
    npx wrangler secret put MY_OTHER_EMAILS   # optional: your old addresses, hidden from results
    npx wrangler secret put MY_ROLES          # optional: employment timeline JSON (below)
    ```
-2. Optional: `MCP_GMAIL_ACCOUNTS` (`work` by default; `work,personal` to also read personal mail).
-3. Connect a client:
+3. Optional: `MCP_GMAIL_ACCOUNTS` (`work` by default; `work,personal` to also read personal mail).
+4. Connect a client:
    ```bash
    claude mcp add --transport http sigparser https://sigparser.rocketsciencegg.workers.dev/mcp
    ```

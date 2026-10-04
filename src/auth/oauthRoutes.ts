@@ -3,10 +3,10 @@ import { Hono } from 'hono';
 import type { Env } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import {
-  canAttemptLogin,
+  admitLoginAttempt,
   checkCredentials,
   credentialFingerprint,
-  recordFailedLogin,
+  clearLoginAttempts,
   timingSafeEqual,
   type McpGrantProps,
 } from './password.js';
@@ -15,7 +15,7 @@ import {
  * OAuth sign-in for MCP clients. `/authorize` shows one form that is both the login (the web
  * UI's AUTH_USERNAME / AUTH_PASSWORD) and the consent screen (which app, and where its access
  * goes). The grant completes only on POST, with a CSRF token bound to a SameSite=Strict
- * cookie, from the same origin, and with failed attempts rate-limited per IP.
+ * cookie, from the same origin, and with attempts rate-limited per client and globally (counted in D1 before the check).
  *
  * These routes are reached outside the main app's Basic auth: the form is its own gate.
  */
@@ -181,11 +181,11 @@ oauthRoutes.post('/authorize', async (c) => {
   }
 
   const ip = clientIp(c.req.raw);
-  if (!(await canAttemptLogin(c.env.OAUTH_KV, ip))) {
+  if (!(await admitLoginAttempt(c.env.DB, ip))) {
     logger.warn('MCP sign-in rate limited', { ip });
     return page(
       'Too many attempts',
-      'Too many failed sign-ins. Wait 15 minutes and try again.',
+      'Too many sign-in attempts. Wait 15 minutes and try again.',
       429,
     );
   }
@@ -197,7 +197,6 @@ oauthRoutes.post('/authorize', async (c) => {
     typeof password !== 'string' ||
     !(await checkCredentials(c.env, username, password))
   ) {
-    await recordFailedLogin(c.env.OAUTH_KV, ip);
     logger.warn('MCP sign-in failed', { ip });
     return loginForm(pending, csrf, 'Wrong username or password.');
   }
@@ -207,6 +206,7 @@ oauthRoutes.post('/authorize', async (c) => {
     return page('Not configured', 'MCP sign-in is not configured on this deployment.', 503);
   }
   await c.env.OAUTH_KV.delete(`oauth-login:${csrf}`);
+  await clearLoginAttempts(c.env.DB, ip);
 
   const props: McpGrantProps = { username, fingerprint };
   const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
