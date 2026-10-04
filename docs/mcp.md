@@ -23,12 +23,12 @@ showing which app connects and where its access goes.
 
 - The grant stores a fingerprint of the credentials; every `/mcp` request re-checks it, so
   changing `AUTH_PASSWORD` signs out every connected client.
-- MCP needs an `AUTH_PASSWORD` of **at least 20 characters** (`/mcp` returns 503 otherwise).
-  Generate one: `openssl rand -base64 24`.
+- MCP needs an `AUTH_PASSWORD` of **at least 8 characters** (`/mcp` returns 503 otherwise).
+  Use one that is random and not reused: there is no global cap, so many IPs get 5 guesses each.
 - Sign-in attempts are counted in D1 (atomic, before the password check): 5 per IP (IPv6 per /64)
   per 15 minutes, then 429. There is deliberately no global cap: anyone can open the form, so a
-  global cap would let a stranger lock you out. The long password is what makes guessing from
-  many IPs useless. CSRF cookie + same-origin check on the POST.
+  global cap would let a stranger lock you out. An unguessable password is what keeps guessing
+  from many IPs useless. CSRF cookie + same-origin check on the POST.
 - Access tokens last 1 hour, refresh tokens 30 days.
 - Until both credentials are set, `/mcp` returns 503.
 
@@ -38,7 +38,7 @@ showing which app connects and where its access goes.
 2. Set the credentials (also the web UI login):
    ```bash
    npx wrangler secret put AUTH_USERNAME
-   npx wrangler secret put AUTH_PASSWORD     # 20+ chars, e.g. openssl rand -base64 24
+   npx wrangler secret put AUTH_PASSWORD     # 8+ chars, random, not reused
    npx wrangler secret put MY_OTHER_EMAILS   # optional: your old addresses, hidden from results
    npx wrangler secret put MY_ROLES          # optional: employment timeline JSON (below)
    ```

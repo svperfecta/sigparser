@@ -14,12 +14,12 @@ export interface McpGrantProps {
 
 const MAX_ATTEMPTS_PER_CLIENT = 5;
 /**
- * MCP is only enabled with a long password. There is deliberately no global attempt cap: anyone
- * can open the sign-in form, so a global cap would let a stranger lock the owner out. Per-client
- * throttling plus a password too long to guess (20+ random chars is >100 bits) bounds brute force
- * instead, even from many IPs.
+ * MCP is only enabled with a password of at least this length (owner's choice). There is
+ * deliberately no global attempt cap: anyone can open the sign-in form, so a global cap would let
+ * a stranger lock the owner out. Brute force is bounded by per-client throttling; an attacker with
+ * many IPs gets 5 guesses per IP per window, so the password must not be guessable or reused.
  */
-export const MIN_MCP_PASSWORD_LENGTH = 20;
+export const MIN_MCP_PASSWORD_LENGTH = 8;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 function isSet(value: string | undefined): value is string {

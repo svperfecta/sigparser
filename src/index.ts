@@ -334,7 +334,7 @@ const fetch: ExportedHandlerFetchHandler<Env> = (request, env, ctx) => {
   ) {
     return Response.json(
       {
-        error: 'MCP is unavailable: set AUTH_USERNAME and an AUTH_PASSWORD of 20+ characters',
+        error: 'MCP is unavailable: set AUTH_USERNAME and an AUTH_PASSWORD of 8+ characters',
       },
       { status: 503 },
     );

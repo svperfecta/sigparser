@@ -21,11 +21,15 @@ describe('MCP password sign-in', () => {
   });
 
   it('refuses MCP sign-in with a short password, even if it is correct', async () => {
-    const short = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: 'nineteen-chars-long' } as Env;
-    expect(short.AUTH_PASSWORD).toHaveLength(19);
+    const short = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: 'seven77' } as Env;
+    expect(short.AUTH_PASSWORD).toHaveLength(7);
     expect(isMcpAuthConfigured(short)).toBe(false);
-    expect(await checkCredentials(short, 'brian', 'nineteen-chars-long')).toBe(false);
+    expect(await checkCredentials(short, 'brian', 'seven77')).toBe(false);
     expect(await credentialFingerprint(short)).toBeNull();
+
+    const eight = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: 'eight888' } as Env;
+    expect(isMcpAuthConfigured(eight)).toBe(true);
+    expect(await checkCredentials(eight, 'brian', 'eight888')).toBe(true);
   });
 
   it('accepts only the exact username and password', async () => {
