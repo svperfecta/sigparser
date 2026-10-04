@@ -15,7 +15,7 @@ import {
  * OAuth sign-in for MCP clients. `/authorize` shows one form that is both the login (the web
  * UI's AUTH_USERNAME / AUTH_PASSWORD) and the consent screen (which app, and where its access
  * goes). The grant completes only on POST, with a CSRF token bound to a SameSite=Strict
- * cookie, from the same origin, and with attempts rate-limited per client and globally (counted in D1 before the check).
+ * cookie, from the same origin, and with attempts rate-limited per client (counted in D1 before the check).
  *
  * These routes are reached outside the main app's Basic auth: the form is its own gate.
  */

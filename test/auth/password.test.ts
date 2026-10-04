@@ -10,7 +10,8 @@ import {
 import type { Env } from '../../src/types/index.js';
 import { createTestD1 } from '../helpers/d1.js';
 
-const env = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: 's3cret' } as Env;
+const PASSWORD = 'a-long-random-passphrase-42';
+const env = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: PASSWORD } as Env;
 
 describe('MCP password sign-in', () => {
   it('is configured only when both credentials are set', () => {
@@ -19,10 +20,18 @@ describe('MCP password sign-in', () => {
     expect(isMcpAuthConfigured({ AUTH_USERNAME: 'brian', AUTH_PASSWORD: '' } as Env)).toBe(false);
   });
 
+  it('refuses MCP sign-in with a short password, even if it is correct', async () => {
+    const short = { AUTH_USERNAME: 'brian', AUTH_PASSWORD: 'nineteen-chars-long' } as Env;
+    expect(short.AUTH_PASSWORD).toHaveLength(19);
+    expect(isMcpAuthConfigured(short)).toBe(false);
+    expect(await checkCredentials(short, 'brian', 'nineteen-chars-long')).toBe(false);
+    expect(await credentialFingerprint(short)).toBeNull();
+  });
+
   it('accepts only the exact username and password', async () => {
-    expect(await checkCredentials(env, 'brian', 's3cret')).toBe(true);
-    expect(await checkCredentials(env, 'brian', 's3cret ')).toBe(false);
-    expect(await checkCredentials(env, 'Brian', 's3cret')).toBe(false);
+    expect(await checkCredentials(env, 'brian', PASSWORD)).toBe(true);
+    expect(await checkCredentials(env, 'brian', `${PASSWORD} `)).toBe(false);
+    expect(await checkCredentials(env, 'Brian', PASSWORD)).toBe(false);
     expect(await checkCredentials(env, '', '')).toBe(false);
     // Never falls back to the web UI's admin/admin development default.
     expect(await checkCredentials({} as Env, 'admin', 'admin')).toBe(false);
@@ -30,7 +39,10 @@ describe('MCP password sign-in', () => {
 
   it('changes the fingerprint when the password changes', async () => {
     const before = await credentialFingerprint(env);
-    const after = await credentialFingerprint({ ...env, AUTH_PASSWORD: 'other' } as Env);
+    const after = await credentialFingerprint({
+      ...env,
+      AUTH_PASSWORD: 'another-long-random-passphrase',
+    } as Env);
     expect(before).not.toBeNull();
     expect(after).not.toBe(before);
     expect(await credentialFingerprint({} as Env)).toBeNull();
@@ -48,14 +60,12 @@ describe('MCP password sign-in', () => {
     expect(await admitLoginAttempt(d1, '1.2.3.4', t + 15 * 60 * 1000 + 20)).toBe(true);
   });
 
-  it('caps attempts globally, so rotating IPs does not help', async () => {
+  it('has no global cap: many failing IPs cannot lock out another client', async () => {
     const { d1 } = createTestD1();
-    const results: boolean[] = [];
-    for (let i = 0; i < 25; i++) {
-      results.push(await admitLoginAttempt(d1, `10.0.0.${i}`, 5_000 + i));
+    for (let i = 0; i < 100; i++) {
+      await admitLoginAttempt(d1, `10.0.${Math.floor(i / 10)}.${i % 10}`, 5_000 + i);
     }
-    expect(results.filter(Boolean)).toHaveLength(20);
-    expect(results.slice(20).every((r) => !r)).toBe(true);
+    expect(await admitLoginAttempt(d1, '203.0.113.7', 6_000)).toBe(true);
   });
 
   it('groups IPv6 clients by /64', async () => {

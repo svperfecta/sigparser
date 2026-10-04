@@ -13,17 +13,33 @@ export interface McpGrantProps {
 }
 
 const MAX_ATTEMPTS_PER_CLIENT = 5;
-// sigparser has one user, so a global cap is the real brute-force bound: rotating IPs does not help.
-const MAX_ATTEMPTS_GLOBAL = 20;
+/**
+ * MCP is only enabled with a long password. There is deliberately no global attempt cap: anyone
+ * can open the sign-in form, so a global cap would let a stranger lock the owner out. Per-client
+ * throttling plus a password too long to guess (20+ random chars is >100 bits) bounds brute force
+ * instead, even from many IPs.
+ */
+export const MIN_MCP_PASSWORD_LENGTH = 20;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 function isSet(value: string | undefined): value is string {
   return value !== undefined && value !== '';
 }
 
-/** True when the web UI credentials exist; MCP is off (503) without them. */
+/** Username and password usable for MCP sign-in, or null (MCP is then off, 503). */
+function mcpCredentials(env: Env): { username: string; password: string } | null {
+  if (!isSet(env.AUTH_USERNAME) || !isSet(env.AUTH_PASSWORD)) {
+    return null;
+  }
+  if (env.AUTH_PASSWORD.length < MIN_MCP_PASSWORD_LENGTH) {
+    return null;
+  }
+  return { username: env.AUTH_USERNAME, password: env.AUTH_PASSWORD };
+}
+
+/** True when the web UI credentials exist and the password is long enough for MCP. */
 export function isMcpAuthConfigured(env: Env): boolean {
-  return isSet(env.AUTH_USERNAME) && isSet(env.AUTH_PASSWORD);
+  return mcpCredentials(env) !== null;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -33,10 +49,11 @@ async function sha256Hex(value: string): Promise<string> {
 
 /** Fingerprint of the current credentials, or null when they are not configured. */
 export async function credentialFingerprint(env: Env): Promise<string | null> {
-  if (!isSet(env.AUTH_USERNAME) || !isSet(env.AUTH_PASSWORD)) {
+  const creds = mcpCredentials(env);
+  if (creds === null) {
     return null;
   }
-  return sha256Hex(`sigparser-mcp\u0000${env.AUTH_USERNAME}\u0000${env.AUTH_PASSWORD}`);
+  return sha256Hex(`sigparser-mcp\u0000${creds.username}\u0000${creds.password}`);
 }
 
 export function timingSafeEqual(a: string, b: string): boolean {
@@ -59,14 +76,15 @@ export async function checkCredentials(
   username: string,
   password: string,
 ): Promise<boolean> {
-  if (!isSet(env.AUTH_USERNAME) || !isSet(env.AUTH_PASSWORD)) {
+  const creds = mcpCredentials(env);
+  if (creds === null) {
     return false;
   }
   const [givenUser, givenPass, wantUser, wantPass] = await Promise.all([
     sha256Hex(username),
     sha256Hex(password),
-    sha256Hex(env.AUTH_USERNAME),
-    sha256Hex(env.AUTH_PASSWORD),
+    sha256Hex(creds.username),
+    sha256Hex(creds.password),
   ]);
   // Evaluate both so timing does not reveal which half was wrong.
   const userOk = timingSafeEqual(givenUser, wantUser);
@@ -102,22 +120,18 @@ async function countAttempt(db: D1Database, key: string, now: number): Promise<n
 }
 
 /**
- * Count a sign-in attempt BEFORE the password is checked, per client and globally, and say
- * whether it may proceed. Counting first means a burst of parallel guesses cannot slip past.
+ * Count a sign-in attempt BEFORE the password is checked and say whether this client may
+ * proceed. Counting first means a burst of parallel guesses cannot slip past.
  */
 export async function admitLoginAttempt(
   db: D1Database,
   clientIp: string,
   now = Date.now(),
 ): Promise<boolean> {
-  const [perClient, global] = await Promise.all([
-    countAttempt(db, clientKey(clientIp), now),
-    countAttempt(db, 'global', now),
-  ]);
-  return perClient <= MAX_ATTEMPTS_PER_CLIENT && global <= MAX_ATTEMPTS_GLOBAL;
+  return (await countAttempt(db, clientKey(clientIp), now)) <= MAX_ATTEMPTS_PER_CLIENT;
 }
 
-/** After a successful sign-in, clear that client's counter (the global one keeps its window). */
+/** After a successful sign-in, clear that client's counter. */
 export async function clearLoginAttempts(db: D1Database, clientIp: string): Promise<void> {
   await db.prepare('DELETE FROM login_attempts WHERE key = ?').bind(clientKey(clientIp)).run();
 }

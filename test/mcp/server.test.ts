@@ -92,7 +92,7 @@ describe('MCP server', () => {
       MY_EMAIL_WORK: 'me@work.com',
       MY_OTHER_EMAILS: 'ME@old.com',
       AUTH_USERNAME: 'owner',
-      AUTH_PASSWORD: 'correct horse',
+      AUTH_PASSWORD: 'correct horse battery staple',
     } as Env;
   });
 
@@ -143,7 +143,7 @@ describe('MCP server', () => {
     expect((await post('sync_status', {}, undefined)).status).toBe(403);
 
     // Changing the password signs out grants approved with the old one.
-    env = { ...env, AUTH_PASSWORD: 'new password' } as Env;
+    env = { ...env, AUTH_PASSWORD: 'a brand new long password' } as Env;
     expect((await post('sync_status', {}, { username: 'owner', fingerprint: good })).status).toBe(
       403,
     );

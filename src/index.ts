@@ -270,7 +270,13 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = (event, env, ctx) => {
     // Personal account (credentials are optional)
     if (env.GMAIL_REFRESH_TOKEN_PERSONAL !== undefined && env.MY_EMAIL_PERSONAL !== undefined) {
       syncPromises.push(
-        runAccountSync(env, 'personal', env.GMAIL_REFRESH_TOKEN_PERSONAL, env.MY_EMAIL_PERSONAL, logger),
+        runAccountSync(
+          env,
+          'personal',
+          env.GMAIL_REFRESH_TOKEN_PERSONAL,
+          env.MY_EMAIL_PERSONAL,
+          logger,
+        ),
       );
     }
 
@@ -319,7 +325,12 @@ const fetch: ExportedHandlerFetchHandler<Env> = (request, env, ctx) => {
     return getOAuthProvider(env.PUBLIC_URL).fetch(request, env, ctx);
   }
   if (new URL(request.url).pathname.startsWith('/mcp')) {
-    return Response.json({ error: 'MCP is unavailable: OAuth is not configured' }, { status: 503 });
+    return Response.json(
+      {
+        error: 'MCP is unavailable: set AUTH_USERNAME and an AUTH_PASSWORD of 20+ characters',
+      },
+      { status: 503 },
+    );
   }
   return app.fetch(request, env, ctx);
 };
